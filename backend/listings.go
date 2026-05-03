@@ -148,6 +148,44 @@ func findRawListings(raw json.RawMessage) []rawListing {
 		}
 	}
 
+	if nested := findRawListings(data); len(nested) > 0 {
+		if infos := toInfoSlice(nested); len(infos) > 0 {
+			return infos
+		}
+	}
+
+	return nil
+}
+
+func findRawListings(raw json.RawMessage) []rawListing {
+	var arr []rawListing
+	if json.Unmarshal(raw, &arr) == nil {
+		for _, item := range arr {
+			photoURLs, _ := listingPhotoURLs(item)
+			if len(photoURLs) > 0 {
+				return arr
+			}
+		}
+	}
+
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return nil
+	}
+
+	for _, key := range []string{"listings", "items", "results", "records", "data"} {
+		if child, ok := obj[key]; ok {
+			if found := findRawListings(child); len(found) > 0 {
+				return found
+			}
+		}
+	}
+	for _, child := range obj {
+		if found := findRawListings(child); len(found) > 0 {
+			return found
+		}
+	}
+
 	return nil
 }
 
