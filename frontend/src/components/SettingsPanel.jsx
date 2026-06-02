@@ -217,7 +217,7 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
                 {activePreviewText(settings)}
               </div>
               <div className="slider-row" style={{marginTop:8}}>
-                <input type="range" min="0.7" max="1.35" step="0.05" value={overlayScale} onChange={e=>set('overlayScale')(+e.target.value)}/>
+                <input type="range" min="0.5" max="1.35" step="0.05" value={overlayScale} onChange={e=>set('overlayScale')(+e.target.value)}/>
                 <span className="slider-val">{Number(overlayScale).toFixed(2)}×</span>
               </div>
               <div className="color-grid">

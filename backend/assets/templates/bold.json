@@ -5,80 +5,144 @@
   "elements": {
     "title": {
       "font": "Inter-Bold.ttf",
-      "size_pct": 0.090,
+      "size_pct": 0.063,
       "color": "#FFD24A",
       "bg": {
-        "color": "#000000", "alpha": 0.75, "radius": 18,
-        "padding": [16, 30]
+        "color": "#000000",
+        "alpha": 0.75,
+        "radius": 12.6,
+        "padding": [
+          11.2,
+          21.0
+        ]
       },
-      "position": { "x": "center", "y": "0.10" },
-      "align": "center", "max_width_pct": 0.90
+      "position": {
+        "x": "center",
+        "y": "0.10"
+      },
+      "align": "center",
+      "max_width_pct": 0.9
     },
     "address": {
       "font": "BeVietnamPro-Bold.ttf",
-      "size_pct": 0.024,
+      "size_pct": 0.0168,
       "color": "#FFFFFF",
       "bg": {
-        "color": "#000000", "alpha": 0.70, "radius": 14,
-        "padding": [10, 22]
+        "color": "#000000",
+        "alpha": 0.7,
+        "radius": 9.8,
+        "padding": [
+          7.0,
+          15.4
+        ]
       },
-      "position": { "x": "center", "y": "0.06" },
-      "align": "center", "max_width_pct": 0.85
+      "position": {
+        "x": "center",
+        "y": "0.06"
+      },
+      "align": "center",
+      "max_width_pct": 0.85
     },
     "nickname": {
       "font": "Inter-Bold.ttf",
-      "size_pct": 0.090,
+      "size_pct": 0.063,
       "color": "#FFD24A",
       "bg": {
-        "color": "#000000", "alpha": 0.75, "radius": 18,
-        "padding": [16, 30]
+        "color": "#000000",
+        "alpha": 0.75,
+        "radius": 12.6,
+        "padding": [
+          11.2,
+          21.0
+        ]
       },
-      "position": { "x": "center", "y": "0.10" },
-      "align": "center", "max_width_pct": 0.90
+      "position": {
+        "x": "center",
+        "y": "0.10"
+      },
+      "align": "center",
+      "max_width_pct": 0.9
     },
     "prices": {
       "font": "BeVietnamPro-Bold.ttf",
-      "size_pct": 0.028,
+      "size_pct": 0.0196,
       "color": "#FFD24A",
       "bg": {
-        "color": "#000000", "alpha": 0.70, "radius": 14,
-        "padding": [10, 22]
+        "color": "#000000",
+        "alpha": 0.7,
+        "radius": 9.8,
+        "padding": [
+          7.0,
+          15.4
+        ]
       },
-      "position": { "x": "center", "y": "0.22" },
-      "align": "center", "line_spacing": 1.4, "max_width_pct": 0.85
+      "position": {
+        "x": "center",
+        "y": "0.22"
+      },
+      "align": "center",
+      "line_spacing": 1.4,
+      "max_width_pct": 0.85
     },
     "amenities": {
       "font": "BeVietnamPro-Regular.ttf",
-      "size_pct": 0.028,
+      "size_pct": 0.0196,
       "color": "#FFFFFF",
       "bg": {
-        "color": "#000000", "alpha": 0.65, "radius": 12,
-        "padding": [8, 18]
+        "color": "#000000",
+        "alpha": 0.65,
+        "radius": 8.4,
+        "padding": [
+          5.6,
+          12.6
+        ]
       },
-      "position": { "x": "center", "y": "0.30" },
-      "align": "center", "line_spacing": 1.4, "max_width_pct": 0.85
+      "position": {
+        "x": "center",
+        "y": "0.30"
+      },
+      "align": "center",
+      "line_spacing": 1.4,
+      "max_width_pct": 0.85
     },
     "listing_id": {
       "font": "BeVietnamPro-Regular.ttf",
-      "size_pct": 0.026,
+      "size_pct": 0.0182,
       "color": "#FFFFFF",
-      "position": { "x": "center", "y": "0.93" },
+      "position": {
+        "x": "center",
+        "y": "0.93"
+      },
       "align": "center"
     },
     "watermark": {
       "font": "BeVietnamPro-Regular.ttf",
-      "size_pct": 0.020,
+      "size_pct": 0.02,
       "color": "#FFFFFF",
       "shadow": {
-        "color": "#000000", "alpha": 0.6, "blur": 4,
-        "offset_x": 1, "offset_y": 1
+        "color": "#000000",
+        "alpha": 0.6,
+        "blur": 4,
+        "offset_x": 1,
+        "offset_y": 1
       },
-      "position": { "x": "right", "y": "0.95" },
+      "position": {
+        "x": "right",
+        "y": "0.95"
+      },
       "align": "right"
     }
   },
   "stack": {
-    "items": ["address", "nickname", "prices", "amenities"],
-    "x": "center", "anchor": "top", "y": "0.08", "margin": 22
+    "items": [
+      "address",
+      "nickname",
+      "prices",
+      "amenities"
+    ],
+    "x": "center",
+    "anchor": "top",
+    "y": "0.08",
+    "margin": 15.4
   }
 }
