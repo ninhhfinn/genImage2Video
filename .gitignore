@@ -1,0 +1,29 @@
+node_modules/
+
+# ── Binary đã build ──
+backend/img2video
+backend/fontspike
+*.exe
+
+# ── Output chẩn đoán / spike ──
+backend/fontspike-out/
+
+# ── Cài đặt & bộ nhớ local của Claude Code ──
+.claude/
+
+# ── Mockup & ảnh mẫu (fixture cho test visual — test tự skip nếu thiếu) ──
+*mockup*.html
+mockphotos/
+mock-assets/
+mockup-assets/
+
+# ── Ảnh/video test rời ở thư mục gốc (dist/ và backend/assets vẫn được commit) ──
+/*.jpg
+/*.jpeg
+/*.png
+/*.webp
+/*.mp4
+
+# ── Rác hệ điều hành ──
+.DS_Store
+Thumbs.db
