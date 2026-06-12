@@ -4,30 +4,57 @@
   "description": "Serif Playfair trắng thanh lịch, canh trái lower-third, không pill — phong cách staycation tối giản",
   "elements": {
     "address": {
-      "font": "Prata-Regular.ttf",
-      "size_pct": 0.026,
+      "font": "DancingScript-Variable.ttf",
+      "size_pct": 0.05,
       "color": "#FFFFFF",
-      "shadow": { "color": "#000000", "alpha": 0.55, "blur": 6, "offset_x": 0, "offset_y": 2 },
-      "position": { "x": "0.06", "y": "0.40" },
+      "shadow": {
+        "color": "#000000",
+        "alpha": 0.55,
+        "blur": 6,
+        "offset_x": 0,
+        "offset_y": 2
+      },
+      "position": {
+        "x": "0.06",
+        "y": "0.40"
+      },
       "align": "left",
       "max_width_pct": 0.85
     },
     "title": {
-      "font": "PlayfairDisplay-Variable.ttf",
-      "size_pct": 0.084,
+      "font": "YesevaOne-Regular.ttf",
+      "size_pct": 0.082,
       "color": "#FFFFFF",
-      "shadow": { "color": "#000000", "alpha": 0.5, "blur": 9, "offset_x": 0, "offset_y": 3 },
-      "position": { "x": "0.05", "y": "0.43" },
+      "shadow": {
+        "color": "#000000",
+        "alpha": 0.5,
+        "blur": 9,
+        "offset_x": 0,
+        "offset_y": 3
+      },
+      "position": {
+        "x": "0.05",
+        "y": "0.43"
+      },
       "align": "left",
       "max_width_pct": 0.92,
       "line_spacing": 1.1
     },
     "nickname": {
-      "font": "PlayfairDisplay-Variable.ttf",
-      "size_pct": 0.084,
+      "font": "YesevaOne-Regular.ttf",
+      "size_pct": 0.082,
       "color": "#FFFFFF",
-      "shadow": { "color": "#000000", "alpha": 0.5, "blur": 9, "offset_x": 0, "offset_y": 3 },
-      "position": { "x": "0.05", "y": "0.43" },
+      "shadow": {
+        "color": "#000000",
+        "alpha": 0.5,
+        "blur": 9,
+        "offset_x": 0,
+        "offset_y": 3
+      },
+      "position": {
+        "x": "0.05",
+        "y": "0.43"
+      },
       "align": "left",
       "max_width_pct": 0.92,
       "line_spacing": 1.1
@@ -36,8 +63,17 @@
       "font": "BeVietnamPro-Bold.ttf",
       "size_pct": 0.0235,
       "color": "#FFFFFF",
-      "shadow": { "color": "#000000", "alpha": 0.55, "blur": 6, "offset_x": 0, "offset_y": 2 },
-      "position": { "x": "0.06", "y": "0.55" },
+      "shadow": {
+        "color": "#000000",
+        "alpha": 0.55,
+        "blur": 6,
+        "offset_x": 0,
+        "offset_y": 2
+      },
+      "position": {
+        "x": "0.06",
+        "y": "0.55"
+      },
       "align": "left",
       "line_spacing": 1.35,
       "max_width_pct": 0.88
@@ -46,8 +82,17 @@
       "font": "Prata-Regular.ttf",
       "size_pct": 0.0265,
       "color": "#FFFFFF",
-      "shadow": { "color": "#000000", "alpha": 0.55, "blur": 6, "offset_x": 0, "offset_y": 2 },
-      "position": { "x": "0.06", "y": "0.62" },
+      "shadow": {
+        "color": "#000000",
+        "alpha": 0.55,
+        "blur": 6,
+        "offset_x": 0,
+        "offset_y": 2
+      },
+      "position": {
+        "x": "0.06",
+        "y": "0.62"
+      },
       "align": "left",
       "line_spacing": 1.5,
       "max_width_pct": 0.88
@@ -56,21 +101,44 @@
       "font": "BeVietnamPro-Bold.ttf",
       "size_pct": 0.022,
       "color": "#FFFFFF",
-      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 4, "offset_x": 0.7, "offset_y": 1.4 },
-      "position": { "x": "center", "y": "0.93" },
+      "shadow": {
+        "color": "#000000",
+        "alpha": 0.6,
+        "blur": 4,
+        "offset_x": 0.7,
+        "offset_y": 1.4
+      },
+      "position": {
+        "x": "center",
+        "y": "0.93"
+      },
       "align": "center"
     },
     "watermark": {
       "font": "BeVietnamPro-Regular.ttf",
       "size_pct": 0.02,
       "color": "#FFFFFF",
-      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 4, "offset_x": 1, "offset_y": 1 },
-      "position": { "x": "right", "y": "0.86" },
+      "shadow": {
+        "color": "#000000",
+        "alpha": 0.6,
+        "blur": 4,
+        "offset_x": 1,
+        "offset_y": 1
+      },
+      "position": {
+        "x": "right",
+        "y": "0.86"
+      },
       "align": "right"
     }
   },
   "stack": {
-    "items": ["address", "nickname", "amenities", "prices"],
+    "items": [
+      "address",
+      "nickname",
+      "amenities",
+      "prices"
+    ],
     "x": "0.06",
     "anchor": "top",
     "y": "0.40",

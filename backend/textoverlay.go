@@ -46,6 +46,10 @@ func renderTextOverlays(cfg Config, tmpDir string) ([]OverlayPlan, error) {
 	if tmplName == "" {
 		return nil, nil
 	}
+	// Template Go-code (v2): vẽ composite đầy đủ icon/hiệu ứng như mockup duyệt.
+	if plans, ok, err := renderVideoTemplateComposite(cfg, tmpDir); ok {
+		return plans, err
+	}
 	tmpl, err := textrender.LoadTemplate(tmplName, assetsTemplatesDir())
 	if err != nil {
 		return nil, err
@@ -159,7 +163,7 @@ func adaptFont(s *textrender.ElementStyle) {
 	}
 	for _, r := range s.Text {
 		if r > 127 {
-			s.FontFile = "PlayfairDisplay-Variable.ttf"
+			s.FontFile = "PlayfairDisplay-Bold.ttf"
 			return
 		}
 	}
@@ -491,7 +495,7 @@ func fontFileForChoice(choice string) string {
 	case "lilita", "lilita-one":
 		return "LilitaOne-Regular.ttf"
 	case "playfair", "playfair-display":
-		return "PlayfairDisplay-Variable.ttf"
+		return "PlayfairDisplay-Bold.ttf"
 	case "yeseva", "yeseva-one":
 		return "YesevaOne-Regular.ttf"
 	default:

@@ -125,6 +125,7 @@ type ThumbnailRequest struct {
 	Prices    []string `json:"prices"`
 	Amenities []string `json:"amenities"`
 	Watermark string   `json:"watermark"`
+	Caption   string   `json:"caption"`
 
 	Width  int `json:"width"`
 	Height int `json:"height"`
@@ -177,7 +178,7 @@ func thumbnailHandler(uploadDir, outputDir string) http.HandlerFunc {
 		cfg := ThumbnailConfig{
 			Width: req.Width, Height: req.Height,
 			Title: req.Title, Address: req.Address, Prices: req.Prices,
-			Amenities: req.Amenities, Watermark: req.Watermark,
+			Amenities: req.Amenities, Watermark: req.Watermark, Caption: req.Caption,
 			TitleFont: req.TitleFont, TitleColor: req.TitleColor,
 			StrokeColor: req.StrokeColor, StrokeWidth: req.StrokeWidth,
 			BodyFont: req.BodyFont, BodyColor: req.BodyColor,

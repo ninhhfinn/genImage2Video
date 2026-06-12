@@ -39,8 +39,9 @@ const DEFAULT_SETTINGS = {
   customFont: '',         // font tự tải lên cho tiêu đề (video + thumbnail); '' = theo template
 
   // ── Thumbnail (ảnh collage tĩnh) — để trống, tự chỉnh sau ──
-  thumbTemplate: '',      // '' classic (hero+polaroid) | daiky | valey | peony | tiger
+  thumbTemplate: '',      // '' classic | daiky|valey|peony|tiger | cento|amber|strip|creamgrid|filmstrip
   thumbTitle: '',         // chữ tiêu đề lớn (vd "Sunset"); trống → lấy nickname
+  thumbCaption: '',       // chữ trên ô ảnh phải-trên của CreamGrid (vd "Disco Room")
   thumbPrice: '',         // dòng giá gọn (vd "2h 249k- 4h 367k- Qua đêm 449k"); trống → tự ghép từ listing
   thumbWatermark: '',     // @handle
   thumbTitleFont: 'Baloo2-Bold.ttf',  // Baloo tròn | Baloo2-ExtraBold.ttf | Prata-Regular.ttf
@@ -146,8 +147,9 @@ export default function App() {
   // ── Build cfg gửi API render-thumbnail ──
   const buildThumbnailCfg = useCallback((listing, { batch = false } = {}) => {
     const s = settings
-    // Random: mỗi listing chọn ngẫu nhiên 1 trong 4 template lưới.
-    const GRID_TEMPLATES = ['daiky', 'valey', 'peony', 'tiger']
+    // Random: mỗi listing chọn ngẫu nhiên 1 template lưới/collage.
+    const GRID_TEMPLATES = ['daiky', 'valey', 'peony', 'tiger',
+      'cento', 'amber', 'strip', 'creamgrid', 'filmstrip']
     let resolvedTemplate = s.thumbTemplate || ''
     if (resolvedTemplate === 'random') {
       resolvedTemplate = GRID_TEMPLATES[Math.floor(Math.random() * GRID_TEMPLATES.length)]
@@ -219,6 +221,7 @@ export default function App() {
       prices,
       amenities,
       watermark: (s.thumbWatermark || '').trim(),
+      caption: (s.thumbCaption || '').trim(),
       width: 960,
       height: 1280,
       title_font: s.customFont || s.thumbTitleFont || 'Baloo2-Bold.ttf',

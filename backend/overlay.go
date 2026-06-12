@@ -13,7 +13,9 @@ import (
 	"sync"
 )
 
-//go:embed assets/fonts/PlayfairDisplay-Variable.ttf
+// Bản static Bold (bake từ font variable): magick/Pango cũng chỉ lấy master
+// Regular của font variable nên badge bị mảnh + số old-style.
+//go:embed assets/fonts/PlayfairDisplay-Bold.ttf
 var fontPlayfairData []byte
 
 //go:embed assets/fonts/LilitaOne-Regular.ttf
@@ -41,7 +43,7 @@ func initFonts() error {
 			fontInitErr = err
 			return
 		}
-		playfairPath = filepath.Join(dir, "PlayfairDisplay-Variable.ttf")
+		playfairPath = filepath.Join(dir, "PlayfairDisplay-Bold.ttf")
 		lilitaP := filepath.Join(dir, "LilitaOne-Regular.ttf")
 		if err := os.WriteFile(playfairPath, fontPlayfairData, 0644); err != nil {
 			fontInitErr = err
@@ -316,7 +318,9 @@ func composeBubbleLayers(cfg Config, canvasW, canvasH int, tmpDir string) ([]com
 func selectedPangoFontFamily(choice string) string {
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "playfair", "playfair-display":
-		return "Playfair Display"
+		// family name của bản static bake (đã rename khỏi "Playfair Display"
+		// để picker phân biệt với font variable gốc)
+		return "Playfair Display Bold"
 	default:
 		return "Lilita One"
 	}

@@ -89,11 +89,17 @@ func flipV(src *image.RGBA) *image.RGBA {
 }
 
 // sampleBilinear writes the bilinear sample of src at (fx, fy) into dst[ox,oy].
-// Interpolation is done in premultiplied alpha to avoid dark fringes around
-// the transparent edges of text/pills.
+// image.RGBA stores ALPHA-PREMULTIPLIED channels, so the stored values are
+// interpolated directly and written back as-is — converting to straight alpha
+// (or re-multiplying) here double-applies alpha and shreds the anti-aliased
+// glyph edges into the chalky speckle the editorial title used to show.
+// The -0.5 centers the sample on pixel centers (output px ox covers
+// [ox,ox+1), its center maps to source index space at sx-0.5).
 func sampleBilinear(dst *image.RGBA, ox, oy int, src *image.RGBA, fx, fy float64) {
 	W := src.Bounds().Dx()
 	H := src.Bounds().Dy()
+	fx -= 0.5
+	fy -= 0.5
 	x0 := int(math.Floor(fx))
 	y0 := int(math.Floor(fy))
 	tx := fx - float64(x0)
@@ -123,27 +129,20 @@ func sampleBilinear(dst *image.RGBA, ox, oy int, src *image.RGBA, fx, fy float64
 	bl := bilerp(b00, b10, b01, b11, tx, ty)
 	a := bilerp(a00, a10, a01, a11, tx, ty)
 
-	var rr, gg, bb uint8
-	if a > 0 {
-		rr = clamp8(r / a * 255)
-		gg = clamp8(g / a * 255)
-		bb = clamp8(bl / a * 255)
-	}
 	i := dst.PixOffset(ox, oy)
-	dst.Pix[i+0] = rr
-	dst.Pix[i+1] = gg
-	dst.Pix[i+2] = bb
+	dst.Pix[i+0] = clamp8(r * 255)
+	dst.Pix[i+1] = clamp8(g * 255)
+	dst.Pix[i+2] = clamp8(bl * 255)
 	dst.Pix[i+3] = clamp8(a * 255)
 }
 
-// premul returns the premultiplied-alpha components of src[x,y] in 0..1.
+// premul returns the (already premultiplied) components of src[x,y] in 0..1.
 func premul(src *image.RGBA, x, y int) (r, g, b, a float64) {
 	i := src.PixOffset(x, y)
-	af := float64(src.Pix[i+3]) / 255
-	return float64(src.Pix[i+0]) / 255 * af,
-		float64(src.Pix[i+1]) / 255 * af,
-		float64(src.Pix[i+2]) / 255 * af,
-		af
+	return float64(src.Pix[i+0]) / 255,
+		float64(src.Pix[i+1]) / 255,
+		float64(src.Pix[i+2]) / 255,
+		float64(src.Pix[i+3]) / 255
 }
 
 func bilerp(v00, v10, v01, v11, tx, ty float64) float64 {

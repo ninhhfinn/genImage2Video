@@ -38,7 +38,7 @@ func TestTitleFontFileOverride(t *testing.T) {
 // (and raw filenames) work in the existing listing-font selector.
 func TestFontFileForChoicePassthrough(t *testing.T) {
 	cases := map[string]string{
-		"playfair":                     "PlayfairDisplay-Variable.ttf",
+		"playfair":                     "PlayfairDisplay-Bold.ttf",
 		"lilita":                       "LilitaOne-Regular.ttf",
 		"uploads/my-font-ab12cd34.ttf": "uploads/my-font-ab12cd34.ttf",
 		"Custom.OTF":                   "Custom.OTF",
