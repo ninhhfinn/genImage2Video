@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -689,14 +692,135 @@ func rawPreview(raw []byte, limit int) string {
 	return s[:limit] + "...(truncated)"
 }
 
-// POST /api/select-listing — download ảnh của 1 listing đã chọn
-// imageDownloadClient caps each listing-photo download. Without a timeout a
-// single hung CDN connection would stall selectListingHandler indefinitely
-// (it waits for every photo), tripping the frontend's request timeout and
-// marking the listing ✗ — the intermittent failure seen when batch-rendering
-// many listings. A var (not a const client) so tests can shorten the timeout.
-var imageDownloadClient = &http.Client{Timeout: 20 * time.Second}
+// Download tuning for listing photos. Concurrency is capped so a big batch
+// (many listings × many photos) doesn't exhaust connections/FDs — which made
+// later listings in a batch fail. Each photo retries transient failures.
+const (
+	maxConcurrentDownloads = 6
+	maxDownloadAttempts    = 3
+	perAttemptTimeout      = 15 * time.Second
+)
 
+// imageDownloadClient downloads listing photos. A var (not const) so tests can
+// shorten the timeout. The per-attempt context is the precise cap; Timeout is a
+// backstop. Connection-pool limits avoid socket exhaustion across a batch.
+var imageDownloadClient = &http.Client{
+	Timeout: 25 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:        32,
+		MaxIdleConnsPerHost: maxConcurrentDownloads,
+		MaxConnsPerHost:     maxConcurrentDownloads * 2,
+		IdleConnTimeout:     30 * time.Second,
+	},
+}
+
+// fetchPhotoWithRetry downloads imgURL into uploadDir/%04d<ext>, retrying
+// transient failures (network errors, timeouts, 429/5xx) with backoff. It
+// writes to a temp file and atomically renames into place so collectImages
+// never observes a half-written or partial image. Honors ctx cancellation so a
+// client disconnect aborts in-flight downloads instead of leaking orphan
+// writers into a dir the next listing will reuse.
+func fetchPhotoWithRetry(ctx context.Context, imgURL, uploadDir string, idx int) error {
+	var lastErr error
+	for attempt := 0; attempt < maxDownloadAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 600 * time.Millisecond):
+			}
+		}
+		retry, err := fetchPhotoOnce(ctx, imgURL, uploadDir, idx)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !retry || ctx.Err() != nil {
+			break
+		}
+	}
+	return lastErr
+}
+
+// fetchPhotoOnce performs one download attempt. retry is true when the failure
+// is transient and worth another attempt.
+func fetchPhotoOnce(ctx context.Context, imgURL, uploadDir string, idx int) (retry bool, err error) {
+	reqCtx, cancel := context.WithTimeout(ctx, perAttemptTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, imgURL, nil)
+	if err != nil {
+		return false, err // malformed URL — permanent
+	}
+	resp, err := imageDownloadClient.Do(req)
+	if err != nil {
+		// A timeout means the photo is slow; retrying within the same tight
+		// per-request budget just stalls the batch again (and compounds the
+		// wall-clock — the very hang this guards against). Retry only quick
+		// connection blips, and only while the parent isn't cancelled.
+		return ctx.Err() == nil && !isTimeoutErr(err), err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		// Don't write a 403/404 HTML error page out as a .jpg — ffmpeg would
+		// choke on it. 408/429/5xx are transient; other 4xx are permanent.
+		transient := resp.StatusCode == http.StatusRequestTimeout ||
+			resp.StatusCode == http.StatusTooManyRequests ||
+			resp.StatusCode >= 500
+		return transient, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	ext := pickPhotoExt(imgURL, resp.Header.Get("Content-Type"))
+	tmp, err := os.CreateTemp(uploadDir, ".dl-*.tmp")
+	if err != nil {
+		return false, err
+	}
+	tmpName := tmp.Name()
+	_, copyErr := io.Copy(tmp, resp.Body)
+	tmp.Close()
+	if copyErr != nil {
+		os.Remove(tmpName) // partial body — retry into a fresh temp file
+		return ctx.Err() == nil && !isTimeoutErr(copyErr), copyErr
+	}
+	if err := os.Rename(tmpName, filepath.Join(uploadDir, fmt.Sprintf("%04d%s", idx, ext))); err != nil {
+		os.Remove(tmpName)
+		return false, err
+	}
+	return false, nil
+}
+
+// isTimeoutErr reports whether err is a request/deadline timeout (client
+// Timeout, per-attempt context deadline, or a net timeout) — as opposed to a
+// quick connection error. Slow timeouts aren't worth retrying within one
+// request; quick connection errors are.
+func isTimeoutErr(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var nerr net.Error
+	return errors.As(err, &nerr) && nerr.Timeout()
+}
+
+// pickPhotoExt resolves a usable image extension from the URL or content-type.
+func pickPhotoExt(imgURL, contentType string) string {
+	ext := filepath.Ext(strings.Split(imgURL, "?")[0])
+	if ext != "" && len(ext) <= 5 {
+		return ext
+	}
+	switch {
+	case strings.Contains(contentType, "jpeg"):
+		return ".jpg"
+	case strings.Contains(contentType, "png"):
+		return ".png"
+	case strings.Contains(contentType, "webp"):
+		return ".webp"
+	default:
+		return ".jpg"
+	}
+}
+
+// POST /api/select-listing — download ảnh của 1 listing đã chọn (song song có
+// giới hạn, retry lỗi tạm thời, fail-closed nếu không tải được ảnh nào).
 func selectListingHandler(uploadDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
@@ -723,6 +847,19 @@ func selectListingHandler(uploadDir string) http.HandlerFunc {
 		// Lưu context listing hiện tại
 		setCurrentListing(body.ListingName, body.ListingID, body.Address, len(body.PhotoURLs))
 
+		// Đừng xoá thư mục ảnh chung khi một render đang đọc nó. Frontend đáng lẽ
+		// render tuần tự, nhưng nếu hàng chờ lỡ nhảy sớm thì chờ render hiện tại
+		// xong (tối đa ~30s) để không rút ảnh khỏi tay ffmpeg đang chạy.
+		for i := 0; i < 300; i++ {
+			state.mu.Lock()
+			running := state.running
+			state.mu.Unlock()
+			if !running {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+
 		os.RemoveAll(uploadDir)
 		os.MkdirAll(uploadDir, 0755)
 
@@ -731,44 +868,13 @@ func selectListingHandler(uploadDir string) http.HandlerFunc {
 			err error
 		}
 		ch := make(chan dlResult, len(body.PhotoURLs))
+		sem := make(chan struct{}, maxConcurrentDownloads)
 
 		for i, u := range body.PhotoURLs {
 			go func(idx int, imgURL string) {
-				resp, err := imageDownloadClient.Get(imgURL)
-				if err != nil {
-					ch <- dlResult{idx, err}
-					return
-				}
-				defer resp.Body.Close()
-				if resp.StatusCode != http.StatusOK {
-					// Don't write a 403/404 HTML error page out as a .jpg —
-					// that produces a corrupt image ffmpeg later chokes on.
-					ch <- dlResult{idx, fmt.Errorf("HTTP %d", resp.StatusCode)}
-					return
-				}
-
-				ext := filepath.Ext(strings.Split(imgURL, "?")[0])
-				if ext == "" || len(ext) > 5 {
-					ct := resp.Header.Get("Content-Type")
-					switch {
-					case strings.Contains(ct, "jpeg"):
-						ext = ".jpg"
-					case strings.Contains(ct, "png"):
-						ext = ".png"
-					case strings.Contains(ct, "webp"):
-						ext = ".webp"
-					default:
-						ext = ".jpg"
-					}
-				}
-				f, err := os.Create(filepath.Join(uploadDir, fmt.Sprintf("%04d%s", idx, ext)))
-				if err != nil {
-					ch <- dlResult{idx, err}
-					return
-				}
-				defer f.Close()
-				_, err = io.Copy(f, resp.Body)
-				ch <- dlResult{idx, err}
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				ch <- dlResult{idx, fetchPhotoWithRetry(r.Context(), imgURL, uploadDir, idx)}
 			}(i, u)
 		}
 
@@ -782,11 +888,30 @@ func selectListingHandler(uploadDir string) http.HandlerFunc {
 			}
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		total := len(body.PhotoURLs)
+		// Fail-closed: with zero usable images the render would later die with
+		// "không có ảnh". Surface an explicit error so the frontend marks the
+		// listing ✗ cleanly and never starts a doomed render.
+		if success == 0 {
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"count":  0,
+				"total":  total,
+				"error":  fmt.Sprintf("không tải được ảnh nào (0/%d)", total),
+				"errors": errs,
+			})
+			return
+		}
+
+		resp := map[string]interface{}{
 			"count":  success,
-			"total":  len(body.PhotoURLs),
+			"total":  total,
 			"errors": errs,
-		})
+		}
+		if success < total {
+			resp["warning"] = fmt.Sprintf("chỉ tải được %d/%d ảnh", success, total)
+		}
+		json.NewEncoder(w).Encode(resp)
 	}
 }
 
