@@ -15,7 +15,7 @@ export const parseListings = (body) =>
   api.post('/parse-listings', body)
 
 export const selectListing = (body) =>
-  api.post('/select-listing', body, { timeout: 60000 }) // many photos can be slow; backend caps each download
+  api.post('/select-listing', body, { timeout: 120000 }) // many photos + retries can be slow; backend caps concurrency/attempts
 
 export const startRender = (body) =>
   api.post('/render', body)

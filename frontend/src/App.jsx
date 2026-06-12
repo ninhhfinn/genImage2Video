@@ -69,6 +69,7 @@ export default function App() {
   const [queue, setQueue]   = useState([])
   const queueIdxRef = useRef(-1)
   const queueRef = useRef([])
+  const startedRef = useRef(new Set())   // chống xử lý trùng 1 listing (gen 2 thumbnail / render đúp)
 
   const { render, rendering, done, pct, progText, status, error } = useRender(
     () => {
@@ -79,7 +80,7 @@ export default function App() {
   )
 
   // ── Build cfg gửi API render ──
-  const buildRenderCfg = useCallback((listing) => {
+  const buildRenderCfg = useCallback((listing, { batch = false } = {}) => {
     const {
       mode, duration, zoom, tiktok, title, titleDuration, watermark, effectType, useOverlay,
       overlayPriceTypes, overlayStyle, overlayFont, overlayScale, overlayText, overlayBg, overlayStroke,
@@ -130,7 +131,9 @@ export default function App() {
       cfg.stroke_color = strokeColor || '#b3471f'
       cfg.title_bg = titleBg || ''
       cfg.body_bg = bodyBg || ''
-      const manualAmenities = (amenitiesText || '')
+      // Batch: mỗi listing dùng tiện nghi của chính nó (bỏ ô override tay, nếu
+      // không cả mẻ video sẽ dính chung một dòng tiện nghi).
+      const manualAmenities = batch ? [] : (amenitiesText || '')
         .split(/[\n;,]+/)
         .flatMap(s => s.split(/\s*-\s+/))
         .map(s => s.trim())
@@ -141,7 +144,7 @@ export default function App() {
   }, [settings])
 
   // ── Build cfg gửi API render-thumbnail ──
-  const buildThumbnailCfg = useCallback((listing) => {
+  const buildThumbnailCfg = useCallback((listing, { batch = false } = {}) => {
     const s = settings
     // Random: mỗi listing chọn ngẫu nhiên 1 trong 4 template lưới.
     const GRID_TEMPLATES = ['daiky', 'valey', 'peony', 'tiger']
@@ -150,14 +153,15 @@ export default function App() {
       resolvedTemplate = GRID_TEMPLATES[Math.floor(Math.random() * GRID_TEMPLATES.length)]
     }
     const firstWord = (str) => (str || '').trim().split(/\s+/)[0] || ''
-    const title = (s.thumbTitle || '').trim()
-      || listing?.nickname
-      || firstWord(listing?.name)
-      || ''
+    // Batch: ưu tiên nickname của từng listing (bỏ ô tiêu đề tay — nếu không cả
+    // mẻ thumbnail sẽ dính chung một tên).
+    const title = batch
+      ? (listing?.nickname || firstWord(listing?.name) || '')
+      : ((s.thumbTitle || '').trim() || listing?.nickname || firstWord(listing?.name) || '')
     // price line: dùng ô nhập tay nếu có; không thì ghép GỌN từ listing
     // (text gốc dài "Giá 2 ngày 1 đêm: Từ 414.300 đ" → "2N1Đ 414k").
     let prices
-    if ((s.thumbPrice || '').trim()) {
+    if (!batch && (s.thumbPrice || '').trim()) {
       prices = s.thumbPrice.split(/\s*-\s+|\n/).map(x => x.trim()).filter(Boolean)
     } else {
       const KEY_LABEL = {
@@ -187,7 +191,7 @@ export default function App() {
         : (listing?.price_lines || [])
     }
     // amenities: dùng chung ô override với video
-    const manual = (s.amenitiesText || '')
+    const manual = batch ? [] : (s.amenitiesText || '')
       .split(/[\n;,]+/)
       .flatMap(x => x.split(/\s*-\s+/))
       .map(x => x.trim())
@@ -261,6 +265,7 @@ export default function App() {
     setQueue(q)
     queueRef.current = q
     queueIdxRef.current = -1
+    startedRef.current = new Set()
     setCount(0)
     setName(`${listings.length} listings`)
     toast(`${listings.length} listing đã vào hàng chờ, tự động render`)
@@ -280,6 +285,8 @@ export default function App() {
   const startQueueItem = async (idx) => {
     const item = queueRef.current[idx]
     if (!item) return
+    if (startedRef.current.has(idx)) return   // đã/đang xử lý listing này → bỏ qua (idempotent, tránh 2 thumbnail + render đúp)
+    startedRef.current.add(idx)
     queueIdxRef.current = idx
     setQueue(q => {
       const next = q.map((x,i) => i===idx ? {...x, status:'running'} : x)
@@ -306,7 +313,7 @@ export default function App() {
         if (nextIdx >= 0) setTimeout(() => startQueueItem(nextIdx), 800)
         return next
       })
-      toast(`Lỗi listing ${idx+1}: ${e.message}`, 'err')
+      toast(`Lỗi listing ${idx+1}: ${e.response?.data?.error || e.message}`, 'err')
       return
     }
     // Mẻ nhiều listing: xuất theo lựa chọn (video | thumbnail | cả hai).
@@ -314,7 +321,7 @@ export default function App() {
     if (mode !== 'video') {
       try {
         await renderThumbnail({
-          ...buildThumbnailCfg(item.listing),
+          ...buildThumbnailCfg(item.listing, { batch: true }),
           save_history: true,
           listing_name: item.listing.nickname || item.listing.name || '',
           listing_id: item.listing.id || '',
@@ -323,7 +330,7 @@ export default function App() {
       } catch (_) { /* lỗi thumbnail không làm hỏng listing */ }
     }
     if (mode !== 'thumbnail') {
-      render(buildRenderCfg(item.listing)) // video tự đẩy queue sang listing kế qua callback
+      render(buildRenderCfg(item.listing, { batch: true })) // video tự đẩy queue sang listing kế qua callback
     } else {
       runNextInQueue() // chỉ thumbnail → đánh dấu xong + tự sang listing kế
     }
@@ -332,7 +339,7 @@ export default function App() {
   const runNextInQueue = useCallback(() => {
     setQueue(prev => {
       const i = queueIdxRef.current
-      if (i < 0) return prev
+      if (i < 0 || !prev[i] || prev[i].status !== 'running') return prev
       const updated = prev.map((x,j) => j===i ? {...x, status:'done'} : x)
       queueRef.current = updated
       const nextIdx = updated.findIndex(x => x.status === 'pending')

@@ -13,6 +13,7 @@ export function useRender(onDone, onError) {
   useEffect(() => () => clearInterval(pollRef.current), [])
 
   const render = async (cfg) => {
+    clearInterval(pollRef.current)   // tear down any prior poller so it can't fire a stale onDone/onError
     setRendering(true); setDone(false)
     setPct(5); setProgText(''); setStatus('Đang khởi động...'); setError('')
     try {
