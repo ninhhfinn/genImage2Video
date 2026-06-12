@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/fogleman/gg"
+	"github.com/golang/freetype/truetype"
 )
 
 // Render paints one styled text element to a transparent PNG.
@@ -41,7 +42,15 @@ func Render(style *ElementStyle, ctx *RenderContext) (*RenderedElement, error) {
 		maxLineW = style.MaxWidthPct * float64(ctx.VideoWidth)
 	}
 	lines := wrapText(measure, style.Text, maxLineW)
-	textW, textH := measureLines(measure, lines, style.LineSpacing)
+	textW, textH, lineH := measureLines(measure, lines, style.LineSpacing)
+
+	// gg's line box under-reports glyphs whose ink rises above the nominal
+	// ascent — Vietnamese stacked tone marks (ồ ắ ễ…) in Latin-metric fonts
+	// like Playfair/Prata. drawLines puts the first baseline at lineH from the
+	// box top, so anything taller clips at the canvas edge and the marks
+	// silently vanish. Extend the box upward to the real ink top.
+	extraTop := math.Max(0, glyphInkTop(fontPath, fontSize, style.Text)-lineH)
+	textH += extraTop
 
 	padV, padH := 0.0, 0.0
 	if style.Bg != nil {
@@ -109,7 +118,7 @@ func Render(style *ElementStyle, ctx *RenderContext) (*RenderedElement, error) {
 				sil.Fill()
 			} else {
 				_ = sil.LoadFontFace(fontPath, fontSize)
-				drawLines(sil, lines, style, originX+padH, originY+padV, textW)
+				drawLines(sil, lines, style, originX+padH, originY+padV+extraTop, textW)
 			}
 		})
 	}
@@ -139,7 +148,7 @@ func Render(style *ElementStyle, ctx *RenderContext) (*RenderedElement, error) {
 			ang := 2 * math.Pi * float64(i) / float64(n)
 			drawLines(dc, lines, style,
 				originX+padH+strokeExtent*math.Cos(ang),
-				originY+padV+strokeExtent*math.Sin(ang), textW)
+				originY+padV+extraTop+strokeExtent*math.Sin(ang), textW)
 		}
 	}
 
@@ -151,7 +160,7 @@ func Render(style *ElementStyle, ctx *RenderContext) (*RenderedElement, error) {
 		float64(textColor.B)/255,
 		float64(textColor.A)/255,
 	)
-	drawLines(dc, lines, style, originX+padH, originY+padV, textW)
+	drawLines(dc, lines, style, originX+padH, originY+padV+extraTop, textW)
 
 	// ── 6. Optional curve: bend the whole composite along an arc. Because the
 	//    warp changes the bounding box and re-centers the content, the shadow
@@ -239,6 +248,35 @@ func drawLines(dc *gg.Context, lines []string, style *ElementStyle, x, y, textW 
 		dc.DrawString(ln, lx, cursorY)
 		cursorY += step
 	}
+}
+
+// glyphInkTop returns the tallest ink extent above the baseline (in pixels)
+// among the runes of text, measured on the actual font outlines. Used to grow
+// the canvas for glyphs that rise above the nominal line box (stacked
+// Vietnamese tone marks in Latin-metric fonts). Returns 0 on any parse error —
+// callers then keep the unadjusted box, which matches the old behavior.
+func glyphInkTop(fontPath string, size float64, text string) float64 {
+	data, err := os.ReadFile(fontPath)
+	if err != nil {
+		return 0
+	}
+	f, err := truetype.Parse(data)
+	if err != nil {
+		return 0
+	}
+	face := truetype.NewFace(f, &truetype.Options{Size: size})
+	defer face.Close()
+	top := 0.0
+	for _, r := range text {
+		b, _, ok := face.GlyphBounds(r)
+		if !ok {
+			continue
+		}
+		if t := -float64(b.Min.Y) / 64; t > top {
+			top = t
+		}
+	}
+	return top
 }
 
 // Save writes the PNG bytes to disk.

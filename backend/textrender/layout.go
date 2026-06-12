@@ -73,9 +73,9 @@ func wrapText(dc *gg.Context, text string, maxWidth float64) []string {
 	return out
 }
 
-// measureLines returns (max line width, total height) for a slice of lines
-// at the currently-loaded font + given lineSpacing multiplier.
-func measureLines(dc *gg.Context, lines []string, lineSpacing float64) (float64, float64) {
+// measureLines returns (max line width, total height, single line height) for a
+// slice of lines at the currently-loaded font + given lineSpacing multiplier.
+func measureLines(dc *gg.Context, lines []string, lineSpacing float64) (float64, float64, float64) {
 	if lineSpacing <= 0 {
 		lineSpacing = 1.2
 	}
@@ -91,7 +91,7 @@ func measureLines(dc *gg.Context, lines []string, lineSpacing float64) (float64,
 		}
 	}
 	totalH := lineH * lineSpacing * float64(len(lines))
-	return maxW, totalH
+	return maxW, totalH, lineH
 }
 
 // resolvePosition converts a string spec ("left"|"center"|"right"|"0.05"|"12px")

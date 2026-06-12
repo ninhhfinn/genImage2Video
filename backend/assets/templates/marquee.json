@@ -1,0 +1,70 @@
+{
+  "name": "marquee",
+  "display_name": "Marquee",
+  "description": "Tiêu đề serif vàng cỡ đại với đổ bóng đỏ mận 3D, phụ đề in nghiêng kem, giá trắng — nổi bật kiểu rạp chiếu",
+  "elements": {
+    "title": {
+      "font": "PlayfairDisplay-Variable.ttf",
+      "size_pct": 0.086,
+      "color": "#F2C14E",
+      "shadow": { "color": "#6E1414", "alpha": 0.92, "blur": 2.5, "offset_x": 2, "offset_y": 6 },
+      "position": { "x": "center", "y": "0.27" },
+      "align": "center",
+      "max_width_pct": 0.94,
+      "line_spacing": 1.0
+    },
+    "nickname": {
+      "font": "PlayfairDisplay-Variable.ttf",
+      "size_pct": 0.086,
+      "color": "#F2C14E",
+      "shadow": { "color": "#6E1414", "alpha": 0.92, "blur": 2.5, "offset_x": 2, "offset_y": 6 },
+      "position": { "x": "center", "y": "0.27" },
+      "align": "center",
+      "max_width_pct": 0.94,
+      "line_spacing": 1.0
+    },
+    "amenities": {
+      "font": "BeVietnamPro-Italic.ttf",
+      "size_pct": 0.0245,
+      "color": "#F3E8CC",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 7, "offset_x": 0, "offset_y": 2 },
+      "position": { "x": "center", "y": "0.45" },
+      "align": "center",
+      "line_spacing": 1.3,
+      "max_width_pct": 0.9
+    },
+    "prices": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.024,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.65, "blur": 7, "offset_x": 0, "offset_y": 2 },
+      "position": { "x": "center", "y": "0.52" },
+      "align": "center",
+      "line_spacing": 1.5,
+      "max_width_pct": 0.85
+    },
+    "listing_id": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.022,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 4, "offset_x": 0.7, "offset_y": 1.4 },
+      "position": { "x": "center", "y": "0.93" },
+      "align": "center"
+    },
+    "watermark": {
+      "font": "BeVietnamPro-Regular.ttf",
+      "size_pct": 0.02,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 4, "offset_x": 1, "offset_y": 1 },
+      "position": { "x": "right", "y": "0.86" },
+      "align": "right"
+    }
+  },
+  "stack": {
+    "items": ["nickname", "amenities", "prices"],
+    "x": "center",
+    "anchor": "center",
+    "y": "0.40",
+    "margin": 16
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "name": "chillgreen",
+  "display_name": "Chill Green",
+  "description": "Headline xanh lá in nghiêng (viền xanh đậm cho dày nét), địa chỉ trắng phía trên, giá trắng — phong cách homestay chữa lành",
+  "elements": {
+    "address": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.024,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 6, "offset_x": 0.7, "offset_y": 2 },
+      "position": { "x": "center", "y": "0.24" },
+      "align": "center",
+      "max_width_pct": 0.9
+    },
+    "title": {
+      "font": "BeVietnamPro-Italic.ttf",
+      "size_pct": 0.039,
+      "color": "#C6F24A",
+      "stroke": { "color": "#234D14", "width": 2.2, "alpha": 1 },
+      "shadow": { "color": "#0c2a06", "alpha": 0.7, "blur": 6, "offset_x": 0, "offset_y": 2 },
+      "position": { "x": "center", "y": "0.27" },
+      "align": "center",
+      "max_width_pct": 0.88,
+      "line_spacing": 1.3
+    },
+    "nickname": {
+      "font": "BeVietnamPro-Italic.ttf",
+      "size_pct": 0.039,
+      "color": "#C6F24A",
+      "stroke": { "color": "#234D14", "width": 2.2, "alpha": 1 },
+      "shadow": { "color": "#0c2a06", "alpha": 0.7, "blur": 6, "offset_x": 0, "offset_y": 2 },
+      "position": { "x": "center", "y": "0.27" },
+      "align": "center",
+      "max_width_pct": 0.88,
+      "line_spacing": 1.3
+    },
+    "prices": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.024,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.65, "blur": 7, "offset_x": 0, "offset_y": 2 },
+      "position": { "x": "center", "y": "0.40" },
+      "align": "center",
+      "line_spacing": 1.55,
+      "max_width_pct": 0.85
+    },
+    "listing_id": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.022,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 4, "offset_x": 0.7, "offset_y": 1.4 },
+      "position": { "x": "center", "y": "0.93" },
+      "align": "center"
+    },
+    "watermark": {
+      "font": "BeVietnamPro-Regular.ttf",
+      "size_pct": 0.02,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 4, "offset_x": 1, "offset_y": 1 },
+      "position": { "x": "right", "y": "0.86" },
+      "align": "right"
+    }
+  },
+  "stack": {
+    "items": ["address", "nickname", "prices"],
+    "x": "center",
+    "anchor": "top",
+    "y": "0.22",
+    "margin": 16
+  }
+}

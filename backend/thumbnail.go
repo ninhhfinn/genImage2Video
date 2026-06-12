@@ -42,6 +42,7 @@ type ThumbnailConfig struct {
 	Prices     []string // compact price strings, joined onto one line
 	Amenities  []string // amenities, wrapped ~3 per line, max 2 lines
 	Watermark  string   // @handle shown over the hero
+	Caption    string   // creamgrid: chữ serif trắng đè đầu ô ảnh phải-trên ("Disco Room")
 
 	// Title styling
 	TitleFont   string  // default Baloo2-Variable.ttf
@@ -288,6 +289,8 @@ func buildThumbnailImage(cfg ThumbnailConfig, photos []string) ([]byte, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.Template)) {
 	case "daiky", "valey", "peony", "tiger":
 		return buildGridThumbnail(cfg, photos)
+	case "cento", "amber", "strip", "creamgrid", "filmstrip":
+		return buildExtraThumbnail(cfg, photos)
 	default:
 		return buildClassicThumbnail(cfg, photos) // hero + polaroid (mặc định cũ)
 	}

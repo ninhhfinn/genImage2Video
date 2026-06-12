@@ -1,0 +1,73 @@
+{
+  "name": "editorial",
+  "display_name": "Editorial",
+  "description": "Tiêu đề serif Prata cỡ lớn canh trái trên cùng, địa chỉ nhỏ, bảng giá trong panel kính mờ bên phải — kiểu tạp chí",
+  "elements": {
+    "title": {
+      "font": "Prata-Regular.ttf",
+      "size_pct": 0.098,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.45, "blur": 10, "offset_x": 0, "offset_y": 3 },
+      "position": { "x": "0.05", "y": "0.10" },
+      "align": "left",
+      "max_width_pct": 0.95,
+      "line_spacing": 0.98
+    },
+    "nickname": {
+      "font": "Prata-Regular.ttf",
+      "size_pct": 0.098,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.45, "blur": 10, "offset_x": 0, "offset_y": 3 },
+      "position": { "x": "0.05", "y": "0.10" },
+      "align": "left",
+      "max_width_pct": 0.95,
+      "line_spacing": 0.98
+    },
+    "address": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.0215,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 6, "offset_x": 0.7, "offset_y": 2 },
+      "position": { "x": "0.065", "y": "0.30" },
+      "align": "left",
+      "max_width_pct": 0.6
+    },
+    "amenities": {
+      "font": "BeVietnamPro-Regular.ttf",
+      "size_pct": 0.0205,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 6, "offset_x": 0.7, "offset_y": 2 },
+      "position": { "x": "0.065", "y": "0.345" },
+      "align": "left",
+      "line_spacing": 1.3,
+      "max_width_pct": 0.45
+    },
+    "prices": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.0225,
+      "color": "#FFFFFF",
+      "bg": { "color": "#1a1a1a", "alpha": 0.34, "radius": 18, "padding": [18, 24] },
+      "shadow": { "color": "#000000", "alpha": 0.4, "blur": 9, "offset_x": 0, "offset_y": 4 },
+      "position": { "x": "0.52", "y": "0.42" },
+      "align": "left",
+      "line_spacing": 1.6,
+      "max_width_pct": 0.42
+    },
+    "listing_id": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.022,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 4, "offset_x": 0.7, "offset_y": 1.4 },
+      "position": { "x": "center", "y": "0.93" },
+      "align": "center"
+    },
+    "watermark": {
+      "font": "BeVietnamPro-Regular.ttf",
+      "size_pct": 0.02,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 4, "offset_x": 1, "offset_y": 1 },
+      "position": { "x": "right", "y": "0.93" },
+      "align": "right"
+    }
+  }
+}

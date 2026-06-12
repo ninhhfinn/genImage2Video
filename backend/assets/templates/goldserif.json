@@ -1,0 +1,79 @@
+{
+  "name": "goldserif",
+  "display_name": "Gold Serif",
+  "description": "Tiêu đề serif vàng gold + địa chỉ trắng phía trên, bảng giá trắng nhiều dòng — sang, dễ đọc",
+  "elements": {
+    "address": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.024,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 6, "offset_x": 0.7, "offset_y": 2 },
+      "position": { "x": "center", "y": "0.18" },
+      "align": "center",
+      "max_width_pct": 0.9
+    },
+    "title": {
+      "font": "PlayfairDisplay-Variable.ttf",
+      "size_pct": 0.07,
+      "color": "#FFD24A",
+      "shadow": { "color": "#000000", "alpha": 0.55, "blur": 8, "offset_x": 0, "offset_y": 3 },
+      "position": { "x": "center", "y": "0.215" },
+      "align": "center",
+      "max_width_pct": 0.92,
+      "line_spacing": 1.1
+    },
+    "nickname": {
+      "font": "PlayfairDisplay-Variable.ttf",
+      "size_pct": 0.07,
+      "color": "#FFD24A",
+      "shadow": { "color": "#000000", "alpha": 0.55, "blur": 8, "offset_x": 0, "offset_y": 3 },
+      "position": { "x": "center", "y": "0.215" },
+      "align": "center",
+      "max_width_pct": 0.92,
+      "line_spacing": 1.1
+    },
+    "prices": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.0235,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 6, "offset_x": 0.7, "offset_y": 2 },
+      "position": { "x": "center", "y": "0.33" },
+      "align": "center",
+      "line_spacing": 1.6,
+      "max_width_pct": 0.85
+    },
+    "amenities": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.021,
+      "color": "#FFD24A",
+      "shadow": { "color": "#000000", "alpha": 0.55, "blur": 6, "offset_x": 0.7, "offset_y": 2 },
+      "position": { "x": "center", "y": "0.30" },
+      "align": "center",
+      "line_spacing": 1.3,
+      "max_width_pct": 0.9
+    },
+    "listing_id": {
+      "font": "BeVietnamPro-Bold.ttf",
+      "size_pct": 0.022,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 4, "offset_x": 0.7, "offset_y": 1.4 },
+      "position": { "x": "center", "y": "0.93" },
+      "align": "center"
+    },
+    "watermark": {
+      "font": "BeVietnamPro-Regular.ttf",
+      "size_pct": 0.02,
+      "color": "#FFFFFF",
+      "shadow": { "color": "#000000", "alpha": 0.6, "blur": 4, "offset_x": 1, "offset_y": 1 },
+      "position": { "x": "right", "y": "0.86" },
+      "align": "right"
+    }
+  },
+  "stack": {
+    "items": ["address", "nickname", "amenities", "prices"],
+    "x": "center",
+    "anchor": "top",
+    "y": "0.17",
+    "margin": 14
+  }
+}

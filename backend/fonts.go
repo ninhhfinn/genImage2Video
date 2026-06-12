@@ -189,6 +189,7 @@ func listFontsHandler() http.HandlerFunc {
 		{File: "Baloo2-ExtraBold.ttf", Label: "Baloo 2 (cực đậm)", Source: "builtin", VietnameseOK: true},
 		{File: "BeVietnamPro-Bold.ttf", Label: "Be Vietnam Pro (đậm)", Source: "builtin", VietnameseOK: true},
 		{File: "Prata-Regular.ttf", Label: "Prata (serif)", Source: "builtin", VietnameseOK: true},
+		{File: "PlayfairDisplay-Bold.ttf", Label: "Playfair Display (serif đậm)", Source: "builtin", VietnameseOK: true},
 		{File: "YesevaOne-Regular.ttf", Label: "Yeseva One (serif cong)", Source: "builtin", VietnameseOK: true},
 		{File: "LilitaOne-Regular.ttf", Label: "Lilita One (dày)", Source: "builtin", VietnameseOK: true},
 	}
