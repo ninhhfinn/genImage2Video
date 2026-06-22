@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>img2video</title>
+    <script>
+      // Áp dụng nền sáng/tối đã lưu trước khi React render (tránh nháy nền)
+      try { document.documentElement.setAttribute('data-theme', localStorage.getItem('img2video-theme') || 'dark'); } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,6 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#070710;--bg2:#0c0c1a;--bg3:#111120;--bg4:#181828;--border:#1c1c30;--border2:#242438;--gold:#f0a500;--gold2:#d49000;--gold3:#ffc040;--text:#e4e4f0;--muted:#52527a;--muted2:#32324a;--green:#3dd68c;--red:#f06060;--r:8px;--mono:'DM Mono',monospace;--head:'Bebas Neue',sans-serif;--body:'Outfit',sans-serif}
+/* ── Light / white theme (toggle in topbar; persisted in localStorage) ── */
+[data-theme="light"]{--bg:#ffffff;--bg2:#f3f3f8;--bg3:#eef0f6;--bg4:#e3e5ef;--border:#e4e4ee;--border2:#d2d2e0;--text:#1d1d2b;--muted:#6c6c84;--muted2:#bcbccc;--green:#16a060;--red:#dc3b3b}
 html,body,#root{height:100%;background:var(--bg);color:var(--text);font-family:var(--body);overflow:hidden}
 ::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
 .app{display:grid;grid-template-rows:54px 1fr;height:100vh}
@@ -12,6 +14,8 @@ html,body,#root{height:100%;background:var(--bg);color:var(--text);font-family:v
 .topbar-pills{display:flex;align-items:center;gap:8px}
 .pill{font-family:var(--mono);font-size:10px;padding:3px 10px;border:1px solid var(--border2);border-radius:20px;color:var(--muted)}
 .pill.active{border-color:rgba(240,165,0,.35);color:var(--gold);background:rgba(240,165,0,.07)}
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--border2);border-radius:8px;background:var(--bg3);color:var(--text);font-size:14px;line-height:1;cursor:pointer;transition:all .15s}
+.theme-toggle:hover{border-color:var(--gold);background:var(--bg4)}
 .phead{position:sticky;top:0;z-index:5;padding:12px 16px 10px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .plabel{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .pbody{padding:14px 16px}
@@ -61,7 +65,7 @@ html,body,#root{height:100%;background:var(--bg);color:var(--text);font-family:v
 .toggle-row:last-child{border-bottom:none}
 .ti .t1{font-size:12px;font-weight:500}.ti .t2{font-size:10px;color:var(--muted);margin-top:2px}
 .toggle{width:36px;height:20px;background:var(--bg4);border:1px solid var(--border2);border-radius:20px;position:relative;cursor:pointer;transition:background .2s;flex-shrink:0}
-.toggle.on{background:var(--gold)}.toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .2s}.toggle.on::after{transform:translateX(16px)}
+.toggle.on{background:var(--gold)}.toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .2s}.toggle.on::after{transform:translateX(16px)}
 .font-tool{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
 .font-preview{margin-top:8px;min-height:42px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:6px;background:var(--bg3);font-size:24px;color:var(--text);text-align:center;padding:8px}
 .font-chips{display:flex;flex-wrap:wrap;gap:6px}

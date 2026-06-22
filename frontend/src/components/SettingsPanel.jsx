@@ -22,6 +22,11 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
   const thumbPillAlpha = settings.thumbPillAlpha ?? 0.32
   const thumbTitleScale = settings.thumbTitleScale ?? 1
   const thumbDataScale = settings.thumbDataScale ?? 1
+  // Tự đăng social
+  const autoPost = settings.autoPost || false
+  const webhookUrl = settings.webhookUrl || ''
+  const postTiktok = settings.postTiktok !== false
+  const postFacebook = settings.postFacebook !== false
   const perImg = Number(duration) || 3
   const titleSecs = Math.max(0.5, Number(titleDuration) || 3)
   const safePhotoLimit = Number(photoLimit) || 12
@@ -312,6 +317,47 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
       <div className="field">
         <label className="flabel">Watermark</label>
         <input className="inp body-font" placeholder="© Tên của bạn" value={watermark} onChange={e=>set('watermark')(e.target.value)}/>
+      </div>
+
+      {/* ── Tự đăng social (qua webhook Make.com / n8n) ── */}
+      <div className="field">
+        <label className="flabel">📤 Tự đăng social</label>
+        <div className="toggle-row">
+          <div className="ti">
+            <div className="t1">Gửi video sau khi render xong</div>
+            <div className="t2">Webhook Make.com / n8n → TikTok · Facebook</div>
+          </div>
+          <div className={`toggle${autoPost?' on':''}`} onClick={()=>set('autoPost')(!autoPost)}/>
+        </div>
+        {autoPost && (
+          <div style={{marginTop:8}}>
+            <input
+              className="inp body-font"
+              placeholder="Dán link Webhook từ Make.com (https://hook…)"
+              value={webhookUrl}
+              onChange={e=>set('webhookUrl')(e.target.value)}
+              style={{marginBottom:8}}
+            />
+            <div className="toggle-row">
+              <div className="ti">
+                <div className="t1">TikTok</div>
+                <div className="t2">Đăng dạng nháp — mở app TikTok bấm publish</div>
+              </div>
+              <div className={`toggle${postTiktok?' on':''}`} onClick={()=>set('postTiktok')(!postTiktok)}/>
+            </div>
+            <div className="toggle-row">
+              <div className="ti">
+                <div className="t1">Facebook</div>
+                <div className="t2">Đăng công khai lên Page</div>
+              </div>
+              <div className={`toggle${postFacebook?' on':''}`} onClick={()=>set('postFacebook')(!postFacebook)}/>
+            </div>
+            <div style={{fontSize:10,color:'var(--muted)',marginTop:4,fontStyle:'italic'}}>
+              Render xong app tự gửi video + thông tin (tiêu đề, giá, địa chỉ, tiện nghi) tới webhook.
+              Gửi lỗi sẽ báo ở thanh tiến trình nhưng KHÔNG làm hỏng video.
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Batch output mode — render nhiều listing xuất gì */}

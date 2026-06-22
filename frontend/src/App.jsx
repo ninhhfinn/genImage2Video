@@ -1,5 +1,5 @@
 import './index.css'
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useToast }   from './hooks/useToast'
 import { useRender }  from './hooks/useRender'
 import SourcePanel    from './components/SourcePanel'
@@ -38,6 +38,12 @@ const DEFAULT_SETTINGS = {
   batchMode: 'both',      // mẻ nhiều listing xuất gì: 'video' | 'thumbnail' | 'both'
   customFont: '',         // font tự tải lên cho tiêu đề (video + thumbnail); '' = theo template
 
+  // ── Tự đăng social qua webhook (Make.com / n8n) ──
+  autoPost: false,        // render xong tự gửi video tới webhook
+  webhookUrl: '',         // link webhook nhận video + metadata
+  postTiktok: true,       // gửi kèm cờ đăng TikTok (Make đăng dạng nháp)
+  postFacebook: true,     // gửi kèm cờ đăng Facebook Page
+
   // ── Thumbnail (ảnh collage tĩnh) — để trống, tự chỉnh sau ──
   thumbTemplate: '',      // '' classic | daiky|valey|peony|tiger | cento|amber|strip|creamgrid|filmstrip
   thumbTitle: '',         // chữ tiêu đề lớn (vd "Sunset"); trống → lấy nickname
@@ -61,6 +67,15 @@ export default function App() {
   const [settings, setSettings]   = useState(DEFAULT_SETTINGS)
   const [histRefresh, setRefresh] = useState(0)
   const [thumbRefresh, setThumbRefresh] = useState(0)
+
+  // Nền sáng/tối — lưu lựa chọn vào localStorage, mặc định tối
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('img2video-theme') || 'dark' } catch { return 'dark' }
+  })
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    try { localStorage.setItem('img2video-theme', theme) } catch { /* ignore */ }
+  }, [theme])
 
   // Thumbnail state
   const [thumbUrl, setThumbUrl]   = useState('')
@@ -140,6 +155,17 @@ export default function App() {
         .map(s => s.trim())
         .filter(Boolean)
       cfg.amenities = manualAmenities.length ? manualAmenities : (listing.amenities || [])
+    }
+    // Tự đăng social: render xong backend gửi video tới webhook
+    if (settings.autoPost && (settings.webhookUrl || '').trim()) {
+      const platforms = []
+      if (settings.postTiktok)   platforms.push('tiktok')
+      if (settings.postFacebook) platforms.push('facebook')
+      if (platforms.length) {
+        cfg.auto_post   = true
+        cfg.webhook_url = settings.webhookUrl.trim()
+        cfg.platforms   = platforms
+      }
     }
     return cfg
   }, [settings])
@@ -381,6 +407,12 @@ export default function App() {
           {uploadedCount>0&&<div className="pill active">📸 {uploadedCount} ảnh{listingName?` — ${listingName}`:''}</div>}
           {isQueueMode&&<div className="pill active">⏳ {doneCount}/{queue.length}</div>}
           <div className="pill">TikTok · Reels · Shorts</div>
+          <button
+            className="theme-toggle"
+            onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')}
+            title={theme === 'light' ? 'Chuyển nền tối' : 'Chuyển nền sáng'}
+            aria-label="Đổi nền sáng/tối"
+          >{theme === 'light' ? '🌙' : '☀️'}</button>
         </div>
       </div>
 

@@ -71,6 +71,11 @@ type RenderRequest struct {
 	// Template system (mới)
 	Template     string                              `json:"template"`
 	CustomStyles map[string]*textrender.ElementStyle `json:"custom_styles,omitempty"`
+
+	// Tự đăng social qua webhook (Make.com / n8n)
+	AutoPost   bool     `json:"auto_post"`
+	WebhookURL string   `json:"webhook_url"`
+	Platforms  []string `json:"platforms"` // ["tiktok","facebook"]
 }
 
 // ─── Start server ─────────────────────────────────────────────────────────
@@ -302,6 +307,9 @@ func renderHandler(uploadDir, outputDir string) http.HandlerFunc {
 			GridIntro:     req.GridIntro,
 			Template:      req.Template,
 			CustomStyles:  req.CustomStyles,
+			AutoPost:      req.AutoPost,
+			WebhookURL:    req.WebhookURL,
+			Platforms:     req.Platforms,
 		}
 		if cfg.Mode == "" {
 			cfg.Mode = "kenburns"
@@ -341,7 +349,7 @@ func renderHandler(uploadDir, outputDir string) http.HandlerFunc {
 				state.mu.Unlock()
 				return
 			}
-			runFFmpegWeb(args, outputFile, outputDir)
+			runFFmpegWeb(args, outputFile, outputDir, cfg)
 		}()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -376,7 +384,7 @@ func downloadHandler(outputDir string) http.HandlerFunc {
 	}
 }
 
-func runFFmpegWeb(args []string, outputFile, outputDir string) {
+func runFFmpegWeb(args []string, outputFile, outputDir string, cfg Config) {
 	if err := checkFFmpeg(); err != nil {
 		state.mu.Lock()
 		state.err = err.Error()
@@ -427,40 +435,77 @@ func runFFmpegWeb(args []string, outputFile, outputDir string) {
 	}
 
 	err := c.Wait()
-	state.mu.Lock()
-	state.running = false
-	state.done = true
+
+	// ── Render lỗi ──
 	if err != nil {
-		state.err = "FFmpeg lỗi: " + err.Error()
+		msg := "FFmpeg lỗi: " + err.Error()
 		if len(errTail) > 0 {
-			state.err += "\n" + strings.Join(errTail, "\n")
+			msg += "\n" + strings.Join(errTail, "\n")
 		}
-	} else {
-		info, _ := os.Stat(outputFile)
-		sizeMB := float64(0)
-		if info != nil {
-			sizeMB = float64(info.Size()) / 1024 / 1024
+		state.mu.Lock()
+		state.running = false
+		state.done = true
+		state.err = msg
+		state.mu.Unlock()
+		return
+	}
+
+	// ── Render thành công ──
+	info, _ := os.Stat(outputFile)
+	sizeMB := float64(0)
+	if info != nil {
+		sizeMB = float64(info.Size()) / 1024 / 1024
+	}
+	state.mu.Lock()
+	state.progress = fmt.Sprintf("Hoàn tất! %.1f MB", sizeMB)
+	state.output = outputFile
+	state.mu.Unlock()
+
+	currentListing.mu.Lock()
+	listingID, listingName, addr, photos :=
+		currentListing.ID, currentListing.Name, currentListing.Addr, currentListing.Photos
+	currentListing.mu.Unlock()
+
+	if filename, saveErr := saveVideoFile(outputFile, outputDir, listingID); saveErr == nil {
+		addToHistory(RenderRecord{
+			ListingName: listingName,
+			ListingID:   listingID,
+			Address:     addr,
+			PhotoCount:  photos,
+			FileSizeMB:  sizeMB,
+			RenderTime:  time.Now().Format("02/01/2006 15:04:05"),
+			FileName:    filename,
+		})
+	}
+
+	// ── Tự đăng social (best-effort, KHÔNG làm hỏng video nếu lỗi) ──
+	// Chạy ngoài state.mu để network I/O không chặn /api/status poller.
+	finalMsg := fmt.Sprintf("Hoàn tất! %.1f MB", sizeMB)
+	if cfg.AutoPost && strings.TrimSpace(cfg.WebhookURL) != "" && len(cfg.Platforms) > 0 {
+		state.mu.Lock()
+		state.progress = "Đang gửi lên social…"
+		state.mu.Unlock()
+
+		meta := SocialMeta{
+			Title:     cfg.Title,
+			Nickname:  cfg.Nickname,
+			Address:   cfg.Address,
+			ListingID: cfg.ListingID,
+			Prices:    cfg.Prices,
+			Amenities: cfg.Amenities,
+			Platforms: cfg.Platforms,
 		}
-		state.progress = fmt.Sprintf("Hoàn tất! %.1f MB", sizeMB)
-		state.output = outputFile
-
-		currentListing.mu.Lock()
-		listingID, listingName, addr, photos :=
-			currentListing.ID, currentListing.Name, currentListing.Addr, currentListing.Photos
-		currentListing.mu.Unlock()
-
-		if filename, saveErr := saveVideoFile(outputFile, outputDir, listingID); saveErr == nil {
-			addToHistory(RenderRecord{
-				ListingName: listingName,
-				ListingID:   listingID,
-				Address:     addr,
-				PhotoCount:  photos,
-				FileSizeMB:  sizeMB,
-				RenderTime:  time.Now().Format("02/01/2006 15:04:05"),
-				FileName:    filename,
-			})
+		if postErr := postToWebhook(cfg.WebhookURL, outputFile, meta); postErr != nil {
+			finalMsg = fmt.Sprintf("Hoàn tất! %.1f MB — ⚠️ gửi đăng lỗi: %s", sizeMB, postErr.Error())
+		} else {
+			finalMsg = fmt.Sprintf("Hoàn tất! %.1f MB — ✅ đã gửi đăng (%s)", sizeMB, strings.Join(cfg.Platforms, ", "))
 		}
 	}
+
+	state.mu.Lock()
+	state.progress = finalMsg
+	state.running = false
+	state.done = true
 	state.mu.Unlock()
 }
 

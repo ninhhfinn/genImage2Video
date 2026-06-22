@@ -2,6 +2,7 @@ node_modules/
 
 # ── Binary đã build ──
 backend/img2video
+backend/image2video
 backend/fontspike
 *.exe
 

@@ -68,6 +68,11 @@ type Config struct {
 	// Template system (mới — thay thế OverlayStyle dần)
 	Template     string                              // "daiky" | "sunset" | "bold"
 	CustomStyles map[string]*textrender.ElementStyle // override per-element
+
+	// Tự đăng social qua webhook (Make.com / n8n) sau khi render xong
+	AutoPost   bool     // bật gửi video tới webhook
+	WebhookURL string   // URL webhook nhận video + metadata
+	Platforms  []string // ["tiktok","facebook"]
 }
 
 var supportedExts = map[string]bool{
