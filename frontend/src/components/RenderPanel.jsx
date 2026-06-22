@@ -11,16 +11,6 @@ function downloadUrlToDisk(url, filename) {
   document.body.removeChild(a)
 }
 
-function downloadUrlToDisk(url, filename) {
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename || 'video.mp4'
-  a.style.display = 'none'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-}
-
 // ── RenderPanel ─────────────────────────────────────────────────────────
 export function RenderPanel({ canRender, onRender, rendering, done, pct, progText, status, error, queue, isQueueMode,
   canThumbnail, onThumbnail, thumbBusy, thumbUrl, thumbErr }) {
