@@ -238,7 +238,7 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
                 {template !== 'sunset' && (
                   <label>
                     <span>Nền tiêu đề</span>
-                    <input type="color" value={titleBg || (template === 'bold' ? '#000000' : '#6F4A30')} onChange={e=>set('titleBg')(e.target.value)}/>
+                    <input type="color" value={titleBg || '#6F4A30'} onChange={e=>set('titleBg')(e.target.value)}/>
                   </label>
                 )}
                 <label>
@@ -314,9 +314,9 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
         <input className="inp body-font" placeholder="© Tên của bạn" value={watermark} onChange={e=>set('watermark')(e.target.value)}/>
       </div>
 
-      {/* Batch output mode — render nhiều listing xuất gì */}
+      {/* Output mode — bấm "Tạo" xuất gì (áp dụng cả listing đơn lẫn nhiều listing) */}
       <div className="field">
-        <label className="flabel">Render nhiều listing → xuất</label>
+        <label className="flabel">Khi bấm Tạo → xuất gì</label>
         <div className="seg" style={{flexWrap:'wrap'}}>
           {[
             ['both', '🎬+🖼️ Cả hai'],
@@ -333,7 +333,7 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
           ))}
         </div>
         <div style={{fontSize:10,color:'var(--muted)',marginTop:4,fontStyle:'italic'}}>
-          Chỉ áp khi chọn nhiều listing (hàng chờ). “Chỉ thumbnail” = tạo loạt ảnh bìa, KHÔNG render video → nhanh hơn nhiều.
+          Áp dụng cho cả listing đơn lẫn nhiều listing. “Chỉ thumbnail” = chỉ tạo ảnh bìa, KHÔNG render video → nhanh hơn nhiều.
         </div>
       </div>
 

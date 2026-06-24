@@ -40,6 +40,11 @@ func Render(style *ElementStyle, ctx *RenderContext) (*RenderedElement, error) {
 	maxLineW := 0.0
 	if style.MaxWidthPct > 0 {
 		maxLineW = style.MaxWidthPct * float64(ctx.VideoWidth)
+	} else if !style.NoWrap {
+		// No explicit width: wrap at a generous 0.90W so a genuinely over-wide
+		// line wraps instead of running off-canvas. Fit-to-width callers set
+		// NoWrap to keep their intentional single-line behavior.
+		maxLineW = 0.90 * float64(ctx.VideoWidth)
 	}
 	lines := wrapText(measure, style.Text, maxLineW)
 	textW, textH, lineH := measureLines(measure, lines, style.LineSpacing)
@@ -199,6 +204,18 @@ func Render(style *ElementStyle, ctx *RenderContext) (*RenderedElement, error) {
 	if !curved {
 		x -= int(margin)
 		y -= int(margin)
+	}
+
+	// ── 8b. Safe-area clamp: keep the element box inside the TikTok safe rectangle
+	//    (right action rail / bottom caption / top status band). No-op when the
+	//    context sets no insets (static thumbnails). ──
+	if ctx.InsetLeftFrac > 0 || ctx.InsetRightFrac > 0 || ctx.InsetTopFrac > 0 || ctx.InsetBottomFrac > 0 {
+		il := int(ctx.InsetLeftFrac * float64(ctx.VideoWidth))
+		ir := int(ctx.InsetRightFrac * float64(ctx.VideoWidth))
+		it := int(ctx.InsetTopFrac * float64(ctx.VideoHeight))
+		ib := int(ctx.InsetBottomFrac * float64(ctx.VideoHeight))
+		x = clampPos(x, finalW, ctx.VideoWidth, il, ir)
+		y = clampPos(y, finalH, ctx.VideoHeight, it, ib)
 	}
 
 	// ── 9. Encode PNG ──

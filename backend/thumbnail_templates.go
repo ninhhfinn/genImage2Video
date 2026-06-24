@@ -63,6 +63,9 @@ func buildGridThumbnail(cfg ThumbnailConfig, photos []string) ([]byte, error) {
 		drawTigerText(dc, cfg, ctx)
 	}
 	drawGridWatermark(dc, cfg, ctx)
+	if spec.name != "tiger" { // tiger đã có khối "Link ID phòng…" riêng
+		drawThumbListingID(dc, cfg, ctx)
+	}
 
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dc.Image(), &jpeg.Options{Quality: 92}); err != nil {
@@ -145,7 +148,7 @@ func drawDaikyText(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderCo
 	titlePill := "#6F4A30" // nâu thương hiệu Daiky (applyDefaults đã set PillColor=#000 nên không dùng được)
 
 	tImg, tM := renderEl(&textrender.ElementStyle{
-		Text: cfg.Title, FontFile: "Prata-Regular.ttf", SizePct: 0.072 * scaleOr(cfg.TitleScale),
+		Text: cfg.Title, FontFile: "PlayfairDisplay-Bold.ttf", SizePct: 0.072 * scaleOr(cfg.TitleScale),
 		Color: "#FFFFFF",
 		Bg:    &textrender.BgStyle{Color: titlePill, Alpha: 1, Radius: 18, Padding: [2]float64{18, 40}},
 		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.30, Blur: 12, OffsetY: 5},
@@ -154,9 +157,9 @@ func drawDaikyText(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderCo
 	aImg, aM := renderEl(&textrender.ElementStyle{
 		Text: strings.TrimSpace(cfg.Address), FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.0255,
 		Color: "#FFFFFF",
-		Bg:    &textrender.BgStyle{Color: "#cdb89c", Alpha: 1, Radius: 60, Padding: [2]float64{12, 34}},
+		Bg:    &textrender.BgStyle{Color: "#cdb89c", Alpha: 0.92, Radius: 60, Padding: [2]float64{12, 34}},
 		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.28, Blur: 9, OffsetY: 3},
-		Align: "center", Curve: 14, MaxWidthPct: 0.7,
+		Align: "center", Curve: 14, MaxWidthPct: 0.62, // chừa chỗ cho vòng cung uốn
 	}, ctx)
 	pImg, pM := renderEl(&textrender.ElementStyle{
 		Text: strings.Join(trimNonEmpty(cfg.Prices), "- "), FontFile: "BeVietnamPro-Bold.ttf",
@@ -204,9 +207,9 @@ func drawValeyTable(dc *gg.Context, cfg ThumbnailConfig) {
 	margin := fW * 0.045
 	left, right := margin, fW-margin
 	tableW := right - left
-	// Lấp đầy vùng dưới lưới → tới gần đáy; rowH co giãn theo số dòng (không để trống).
+	// Lấp đầy vùng dưới lưới; chừa đáy cho dòng ID. rowH co giãn theo số dòng.
 	top := fH * 0.575
-	bottom := fH * 0.955
+	bottom := fH * 0.90 // chừa đáy cho dòng ID (ID pill nâng lên 0.05H)
 	total := bottom - top
 	rowH := total / float64(len(rows)+1)
 	headH := rowH
@@ -217,13 +220,22 @@ func drawValeyTable(dc *gg.Context, cfg ThumbnailConfig) {
 
 	colsX := []float64{left, left + tableW*0.44, left + tableW*0.72, right}
 	fontPath := filepath.Join(assetsDir(), "fonts", "BeVietnamPro-Bold.ttf")
-	_ = dc.LoadFontFace(fontPath, fH*0.0135)
+	baseSize := fH * 0.0120
+	_ = dc.LoadFontFace(fontPath, baseSize)
 
+	// cell vẽ chữ căn theo cột; nếu chuỗi rộng hơn ô thì TỰ CO cỡ chữ cho vừa
+	// (giá dài "1.500.000đ" không tràn/đè cột bên cạnh), xong khôi phục cỡ gốc.
 	cell := func(txt string, j int, midY float64, head bool) {
 		if head {
 			dc.SetColor(color.RGBA{74, 53, 33, 255})
 		} else {
 			dc.SetColor(color.RGBA{90, 70, 49, 255})
+		}
+		colW := colsX[j+1] - colsX[j]
+		avail := colW - 18
+		if w, _ := dc.MeasureString(txt); w > avail && avail > 0 {
+			_ = dc.LoadFontFace(fontPath, baseSize*avail/w)
+			defer dc.LoadFontFace(fontPath, baseSize)
 		}
 		if j == 0 {
 			dc.DrawStringAnchored(txt, colsX[0]+12, midY, 0, 0.42)
@@ -285,7 +297,7 @@ func drawPeonyText(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderCo
 		bImg, bM = renderEl(&textrender.ElementStyle{
 			Text: strings.Join(boxLines, "\n"), FontFile: "BeVietnamPro-Bold.ttf",
 			SizePct: 0.020 * scaleOr(cfg.DataScale), Color: "#FFFFFF",
-			Bg:    &textrender.BgStyle{Color: "#28282e", Alpha: 0.74, Radius: 14, Padding: [2]float64{16, 20}},
+			Bg:    &textrender.BgStyle{Color: "#28282e", Alpha: 0.62, Radius: 14, Padding: [2]float64{16, 20}},
 			Align: "left", LineSpacing: 1.5, MaxWidthPct: 0.82,
 		}, ctx)
 	}
@@ -329,7 +341,7 @@ func drawTigerText(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderCo
 			Text: "Link ID phòng trên Dayladau\n" + id, FontFile: "BeVietnamPro-Italic.ttf",
 			SizePct: 0.022, Color: "#FFFFFF",
 			Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.6, Blur: 6, OffsetY: 2},
-			Align: "center", LineSpacing: 1.3,
+			Align: "center", LineSpacing: 1.3, MaxWidthPct: 0.9,
 		}, ctx)
 	}
 
@@ -360,6 +372,28 @@ func drawTigerText(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderCo
 	}
 }
 
+// drawThumbListingID vẽ mã ID listing nhỏ, canh giữa-đáy thumbnail trên 1 pill
+// tối mờ (đọc rõ trên cả nền kem lẫn nền ảnh). Bỏ qua nếu trống. Tiger tự render
+// ID riêng trong khối chữ nên KHÔNG gọi hàm này.
+func drawThumbListingID(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContext) {
+	id := strings.TrimSpace(cfg.ListingID)
+	if id == "" {
+		return
+	}
+	W, H := cfg.Width, cfg.Height
+	img, m := renderEl(&textrender.ElementStyle{
+		Text: "ID: " + id, FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.018, Color: "#FFFFFF",
+		Bg:     &textrender.BgStyle{Color: "#000000", Alpha: 0.5, Radius: 14, Padding: [2]float64{7, 18}},
+		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.4, Blur: 5, OffsetY: 1},
+		Align:  "center", MaxWidthPct: 0.9,
+	}, ctx)
+	if img == nil {
+		return
+	}
+	y := H - int(0.05*float64(H)) - contentH(img, m) // nâng khỏi mép đáy
+	drawCX(dc, img, W, y, m)
+}
+
 func drawGridWatermark(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContext) {
 	if strings.TrimSpace(cfg.Watermark) == "" {
 		return
@@ -374,8 +408,8 @@ func drawGridWatermark(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.Rend
 		return
 	}
 	cw, chh := img.Bounds().Dx()-2*m, img.Bounds().Dy()-2*m
-	x := W - int(float64(W)*0.035) - cw
-	y := H - int(float64(H)*0.035) - chh
+	x := W - int(float64(W)*0.05) - cw
+	y := H - int(float64(H)*0.05) - chh
 	note := float64(W) * 0.026
 	drawMusicNote(dc, float64(x)-note-8, float64(y)-2, note, color.RGBA{255, 255, 255, 255})
 	dc.DrawImage(img, x-m, y-m)
@@ -420,6 +454,20 @@ func trimNonEmpty(xs []string) []string {
 		if x = strings.TrimSpace(x); x != "" {
 			out = append(out, x)
 		}
+	}
+	return out
+}
+
+// maxAmenities — số tiện ích tối đa hiển thị để khối tiện ích không tràn/đè (lưới
+// an toàn). Frontend đã lọc theo whitelist ưu tiên (≤7 mục); đây là chốt chặn an
+// toàn cho cả đường thủ công. Áp ở buildThumbnailImage và renderTextOverlays.
+const maxAmenities = 7
+
+// capAmenities trim, bỏ rỗng rồi giữ tối đa n mục đầu tiên.
+func capAmenities(xs []string, n int) []string {
+	out := trimNonEmpty(xs)
+	if n > 0 && len(out) > n {
+		out = out[:n]
 	}
 	return out
 }

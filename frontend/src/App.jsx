@@ -53,6 +53,32 @@ const DEFAULT_SETTINGS = {
   thumbDataScale: 1,      // cỡ chữ data (×)
 }
 
+// Tiện ích lấy từ API → chỉ giữ các mục thuộc danh sách ưu tiên này, đúng thứ
+// tự, "cái nào API có thì hiện". Khớp bỏ dấu + không phân biệt hoa/thường để bắt
+// được cách viết khác nhau từ API (vd "Bếp từ" → Bếp, "TV"/"Smart TV" → Tivi,
+// "Máy chiếu Netflix" → cả Máy chiếu lẫn Netflix).
+const normAmenity = (s) =>
+  (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').trim()
+const AMENITY_WHITELIST = [
+  // Khớp trên amenities ĐÃ DỊCH sang tiếng Việt (backend translateAmenities) —
+  // kèm token tiếng Anh làm fallback nếu token chưa có trong bảng dịch.
+  // Lưu ý tránh khớp nhầm: KHÔNG dùng 'giat' trơn (đụng "Nước giặt"=laundry
+  // detergent); KHÔNG dùng 'tam' trơn (đụng "Tắm đứng"); dùng cụm đủ rõ.
+  { label: 'Bếp',       kw: ['bep', 'kitchen', 'stove', 'induction'] },
+  { label: 'Máy chiếu', kw: ['may chieu', 'projector'] },
+  { label: 'Tivi',      kw: ['tivi', 'ti vi', 'tv', 'television'] },
+  { label: 'Netflix',   kw: ['netflix'] },
+  { label: 'Bồn tắm',   kw: ['bon tam', 'bathtub', 'hot tub', 'jacuzzi'] },
+  { label: 'Thang máy', kw: ['thang may', 'elevator', 'lift'] },
+  { label: 'Máy giặt',  kw: ['may giat', 'washer'] },
+]
+function curateAmenities(apiList) {
+  const items = (apiList || []).map(normAmenity)
+  return AMENITY_WHITELIST
+    .filter(({ kw }) => items.some(a => kw.some(k => a.includes(k))))
+    .map(({ label }) => label)
+}
+
 export default function App() {
   const [toasts, toast]           = useToast()
   const [uploadedCount, setCount] = useState(0)
@@ -139,7 +165,7 @@ export default function App() {
         .flatMap(s => s.split(/\s*-\s+/))
         .map(s => s.trim())
         .filter(Boolean)
-      cfg.amenities = manualAmenities.length ? manualAmenities : (listing.amenities || [])
+      cfg.amenities = manualAmenities.length ? manualAmenities : curateAmenities(listing.amenities || [])
     }
     return cfg
   }, [settings])
@@ -198,7 +224,7 @@ export default function App() {
       .flatMap(x => x.split(/\s*-\s+/))
       .map(x => x.trim())
       .filter(Boolean)
-    const amenities = manual.length ? manual : (listing?.amenities || [])
+    const amenities = manual.length ? manual : curateAmenities(listing?.amenities || [])
 
     // Bảng giá cho template Valey (Trong tuần / Cuối tuần) từ prices_by_week.
     let price_table = []
@@ -212,7 +238,8 @@ export default function App() {
       const nsr = listing?.night_short_rate || 0.3
       if (pfh) price_table.push({ slot: (fh ? fh + 'h' : 'Giờ') + ' đầu', weekday: k(pfh), weekend: k(pfh) })
       if (wd) price_table.push({ slot: '2 ngày 1 đêm', weekday: k(wd), weekend: k(we) })
-      if (wd) price_table.push({ slot: 'Qua đêm', weekday: k(Math.round((nsr || 0.3) * wd)), weekend: k(Math.round((nsr || 0.3) * we)) })
+      // qua đêm = giá ngày SAU giảm: (1 - night_short_rate) × giá ngày (khớp API)
+      if (wd) price_table.push({ slot: 'Qua đêm', weekday: k(Math.round((1 - nsr) * wd)), weekend: k(Math.round((1 - nsr) * we)) })
     }
 
     return {
@@ -281,7 +308,31 @@ export default function App() {
       if (idx === -1) { toast('Tất cả đã render xong', 'ok'); return }
       await startQueueItem(idx)
     } else {
-      render(buildRenderCfg(activeListing))
+      // Listing đơn: xuất theo lựa chọn (video | thumbnail | cả hai) — giống nhánh nhiều listing.
+      const mode = settings.batchMode || 'both'
+      if (mode !== 'video') {
+        setThumbBusy(true); setThumbErr('')
+        try {
+          const { data } = await renderThumbnail({
+            ...buildThumbnailCfg(activeListing),
+            save_history: true,
+            listing_name: activeListing?.nickname || activeListing?.name || '',
+            listing_id:   activeListing?.id || '',
+          })
+          if (data.error) throw new Error(data.error)
+          setThumbUrl(data.url)
+          setThumbRefresh(n => n + 1)
+          toast('Đã tạo thumbnail ✓', 'ok')
+        } catch (e) {
+          setThumbErr(e?.response?.data?.error || e.message)
+          toast('Lỗi tạo thumbnail', 'err')
+        } finally {
+          setThumbBusy(false)
+        }
+      }
+      if (mode !== 'thumbnail') {
+        render(buildRenderCfg(activeListing))
+      }
     }
   }
 
@@ -408,6 +459,7 @@ export default function App() {
             done={done && !isQueueMode}
             pct={pct} progText={progText} status={status} error={error}
             queue={queue} isQueueMode={isQueueMode}
+            batchMode={settings.batchMode||'both'}
             canThumbnail={uploadedCount>0}
             onThumbnail={generateThumbnail}
             thumbBusy={thumbBusy}

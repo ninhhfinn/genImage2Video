@@ -200,13 +200,15 @@ func toInfoSlice(raws []rawListing) []ListingInfo {
 		}
 		mondayPrice := priceByWeekday(pricesByWeek, 1)
 		if mondayPrice > 0 {
-			// Giá qua đêm 9PM-9AM = night_short_rate × giá ngày thường (đúng mô tả
-			// UI). Trước đây hardcode 0.3 → sai với listing có rate khác (vd 0.1).
+			// Giá qua đêm 9PM-9AM = giá ngày thường SAU KHI giảm night_short_rate.
+			// night_short_rate là TỈ LỆ GIẢM (vd 0.3 = giảm 30% → khách trả 70%),
+			// KHÔNG phải hệ số nhân. Đã kiểm chứng khớp special_offer_times của API
+			// (vd giá ngày 399k, rate 0.3 → qua đêm 279k, không phải 119k).
 			rate := nightShortRate
 			if rate <= 0 {
 				rate = 0.3 // fallback khi API không trả night_short_rate
 			}
-			nightPrice := int64(math.Round(rate * float64(mondayPrice)))
+			nightPrice := int64(math.Round((1 - rate) * float64(mondayPrice)))
 			if nightPrice > 0 {
 				items = append(items, PriceLineItem{
 					Key:  "overnight",

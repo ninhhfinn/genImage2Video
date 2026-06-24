@@ -49,6 +49,7 @@ func buildExtraThumbnail(cfg ThumbnailConfig, photos []string) ([]byte, error) {
 		drawFilmstrip(dc, cfg, ctx, photos)
 	}
 	drawGridWatermark(dc, cfg, ctx)
+	drawThumbListingID(dc, cfg, ctx)
 
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dc.Image(), &jpeg.Options{Quality: 92}); err != nil {
@@ -90,6 +91,30 @@ func drawAt(dc *gg.Context, img image.Image, x, y, m int) {
 	dc.DrawImage(img, x-m, y-m)
 }
 
+// drawAtClamped vẽ như drawAt nhưng kéo hộp NỘI DUNG vào trong khung an toàn:
+// mép phải ≤ W-insetR, mép dưới ≤ H-insetB (và không âm). Dùng cho các phần tử
+// composite căn mép/lệch tay có thể tràn ra ngoài khung video.
+func drawAtClamped(dc *gg.Context, img image.Image, x, y, m, W, H, insetR, insetB int) {
+	if img == nil {
+		return
+	}
+	cw := img.Bounds().Dx() - 2*m
+	ch := img.Bounds().Dy() - 2*m
+	if x+cw > W-insetR {
+		x = W - insetR - cw
+	}
+	if x < 0 {
+		x = 0
+	}
+	if y+ch > H-insetB {
+		y = H - insetB - ch
+	}
+	if y < 0 {
+		y = 0
+	}
+	dc.DrawImage(img, x-m, y-m)
+}
+
 // vGradient paints a vertical gradient rectangle (top→bottom colors).
 func vGradient(dc *gg.Context, x, y, w, h float64, top, bot color.Color) {
 	g := gg.NewLinearGradient(0, y, 0, y+h)
@@ -120,10 +145,10 @@ func drawCento(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContex
 		x, y  float64
 		ax, ay float64 // align anchor (0 left/top, 1 right/bottom)
 	}{
-		{0.035 * W, 0.030 * H, 0, 0},
-		{0.965 * W, 0.030 * H, 1, 0},
-		{0.035 * W, 0.535 * H, 0, 0},
-		{0.965 * W, 0.535 * H, 1, 0},
+		{0.05 * W, 0.05 * H, 0, 0},
+		{0.95 * W, 0.05 * H, 1, 0},
+		{0.05 * W, 0.95 * H, 0, 1}, // dưới-trái: canh ĐÁY (đối xứng nhãn trên), khỏi đè panel/nối ảnh
+		{0.95 * W, 0.95 * H, 1, 1}, // dưới-phải: canh ĐÁY
 	}
 	for i := 0; i < len(labels) && i < 4; i++ {
 		al := "left"
@@ -144,18 +169,18 @@ func drawCento(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContex
 		if corners[i].ax == 1 {
 			x = int(corners[i].x) - cwid
 		}
-		drawAt(dc, img, x, int(corners[i].y), m)
+		y := int(corners[i].y)
+		if corners[i].ay == 1 { // canh ĐÁY: corners[i].y là mép DƯỚI của nội dung
+			y -= contentH(img, m)
+		}
+		drawAt(dc, img, x, y, m)
 	}
 
-	// badge chỉ số trang "3/19" góc trên phải
-	if bImg, bm := renderEl(&textrender.ElementStyle{Text: "3/19", FontFile: "BeVietnamPro-Bold.ttf",
-		SizePct: 0.022, Color: "#FFFFFF",
-		Bg: &textrender.BgStyle{Color: "#000000", Alpha: 0.42, Radius: 22, Padding: [2]float64{8, 16}}, Align: "center"}, ctx); bImg != nil {
-		dc.DrawImage(bImg, int(0.95*W)-(bImg.Bounds().Dx()-2*bm)-bm, int(0.03*H)-bm)
-	}
+	// (Bỏ badge "3/19" hardcode — nó đè lên nhãn giá góc phải và là số giả.)
 
-	// thanh thông tin nâu ở giữa — canh TRÁI, có icon nhà/ghim/sao
-	titleImg, tM := renderEl(&textrender.ElementStyle{Text: strings.ToUpper(cfg.Title), FontFile: "Fredoka-Bold.ttf",
+	// thanh thông tin nâu ở giữa — canh TRÁI, có icon nhà/ghim/sao.
+	// Fredoka-Bold KHÔNG có dấu tiếng Việt (tiêu đề bị tofu) → dùng Baloo2-Bold.
+	titleImg, tM := renderEl(&textrender.ElementStyle{Text: strings.ToUpper(cfg.Title), FontFile: "Baloo2-Bold.ttf",
 		SizePct: 0.038 * scaleOr(cfg.TitleScale), Color: "#FFFFFF", Align: "left", MaxWidthPct: 0.78}, ctx)
 	addrImg, aM := renderEl(&textrender.ElementStyle{Text: strings.TrimSpace(cfg.Address),
 		FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.021, Color: "#F0E0CC", Align: "left", MaxWidthPct: 0.78}, ctx)
@@ -189,7 +214,8 @@ func drawCento(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContex
 	panelH := float64(total + 2*padV)
 	px := (W - panelW) / 2
 	py := H/2 - panelH/2
-	dc.SetColor(color.NRGBA{74, 46, 30, 245})
+	// Panel nâu MỜ (alpha 135/255 ≈ 53%) để vẫn thấy ảnh phía sau, không che kín.
+	dc.SetColor(color.NRGBA{74, 46, 30, 135})
 	dc.DrawRoundedRectangle(px, py, panelW, panelH, 20)
 	dc.Fill()
 
@@ -231,44 +257,39 @@ func drawAmber(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContex
 		drawAt(dc, img, int(0.05*W), int(0.045*H), m)
 	}
 
-	// tiêu đề serif lớn canh trái-dưới
-	titleImg, tM := renderEl(&textrender.ElementStyle{
-		Text: cfg.Title, FontFile: "Prata-Regular.ttf", SizePct: 0.125 * scaleOr(cfg.TitleScale),
+	// tiêu đề serif lớn canh trái-dưới. Dùng fit-to-width để TỰ CO vừa khung:
+	// tên dài 1 từ (vd "mangoapartment") không wrap được nên trước đây tràn viền.
+	titleImg, tM := renderElFitWidth(&textrender.ElementStyle{
+		Text: cfg.Title, FontFile: "PlayfairDisplay-Bold.ttf", SizePct: 0.125 * scaleOr(cfg.TitleScale),
 		Color: orStr(cfg.TitleColor, "#FFFFFF"),
 		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.5, Blur: 12, OffsetY: 4},
-		Align: "left", MaxWidthPct: 0.94,
-	}, ctx)
+		Align: "left",
+	}, ctx, 0.90)
 	titleTop := int(0.64 * H)
 	drawAt(dc, titleImg, int(0.05*W), titleTop, tM)
 	titleBottom := titleTop + contentH(titleImg, tM)
 	titleRight := int(0.05*W) + contentW(titleImg, tM)
 
-	// pill cam "Room" dưới-phải tiêu đề
-	if roomImg, rm := renderEl(&textrender.ElementStyle{Text: "Room", FontFile: "Prata-Regular.ttf",
+	// pill cam "Room" dưới-phải tiêu đề (Playfair đồng bộ tiêu đề)
+	if roomImg, rm := renderEl(&textrender.ElementStyle{Text: "Room", FontFile: "PlayfairDisplay-Bold.ttf",
 		SizePct: 0.05, Color: "#FFFFFF",
 		Bg: &textrender.BgStyle{Color: "#E8852A", Alpha: 1, Radius: 26, Padding: [2]float64{10, 26}}, Align: "center"}, ctx); roomImg != nil {
 		drawAt(dc, roomImg, titleRight-contentW(roomImg, rm), titleBottom-int(0.012*H), rm)
 	}
-
-	// badge "1/4" góc trên phải
-	if bImg, bm := renderEl(&textrender.ElementStyle{Text: "1/4", FontFile: "BeVietnamPro-Bold.ttf",
-		SizePct: 0.022, Color: "#FFFFFF",
-		Bg: &textrender.BgStyle{Color: "#000000", Alpha: 0.4, Radius: 14, Padding: [2]float64{8, 16}}, Align: "center"}, ctx); bImg != nil {
-		dc.DrawImage(bImg, int(0.95*W)-(bImg.Bounds().Dx()-2*bm)-bm, int(0.035*H)-bm)
-	}
+	// (Bỏ badge "1/4" hardcode — số giả, đè nhãn giá góc phải.)
 
 	// pill địa chỉ xanh ở dưới-giữa (chữ HOA + ghim)
 	if addr := strings.TrimSpace(cfg.Address); addr != "" {
 		img, m := renderEl(&textrender.ElementStyle{
 			Text: "         " + strings.ToUpper(addr), FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.023,
 			Color: "#FFFFFF",
-			Bg:    &textrender.BgStyle{Color: "#2E7D52", Alpha: 0.96, Radius: 40, Padding: [2]float64{12, 30}},
+			Bg:    &textrender.BgStyle{Color: "#2E7D52", Alpha: 0.85, Radius: 40, Padding: [2]float64{12, 30}},
 			Align: "center", MaxWidthPct: 0.92,
 		}, ctx)
 		if img != nil {
 			lh := contentH(img, m)
 			px := (cfg.Width - (img.Bounds().Dx() - 2*m)) / 2
-			py := int(0.90 * H)
+			py := int(0.86 * H) // nâng khỏi mép đáy để địa chỉ wrap 2 dòng không lọt khung
 			dc.DrawImage(img, px-m, py-m)
 			drawPinIcon(dc, float64(px)+float64(lh)*0.5, float64(py)+float64(lh)*0.13, float64(lh)*0.6, color.NRGBA{255, 255, 255, 255})
 		}
@@ -292,7 +313,7 @@ func drawStrip(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContex
 
 	// tiêu đề + địa chỉ canh TRÁI trên cùng
 	titleImg, tM := renderEl(&textrender.ElementStyle{
-		Text: cfg.Title, FontFile: "Prata-Regular.ttf", SizePct: 0.076 * scaleOr(cfg.TitleScale),
+		Text: cfg.Title, FontFile: "PlayfairDisplay-Bold.ttf", SizePct: 0.076 * scaleOr(cfg.TitleScale),
 		Color: orStr(cfg.TitleColor, "#FFFFFF"), Shadow: shadow(), Align: "left", MaxWidthPct: 0.9}, ctx)
 	drawAt(dc, titleImg, leftX, int(0.05*H), tM)
 	addrImg, aM := renderEl(&textrender.ElementStyle{
@@ -303,7 +324,7 @@ func drawStrip(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContex
 
 	// giá canh TRÁI, ngay dưới địa chỉ
 	prImg, prM := renderEl(&textrender.ElementStyle{
-		Text: strings.Join(trimNonEmpty(cfg.Prices), "\n"), FontFile: "Prata-Regular.ttf",
+		Text: strings.Join(trimNonEmpty(cfg.Prices), "\n"), FontFile: "PlayfairDisplay-Bold.ttf",
 		SizePct: 0.030 * scaleOr(cfg.DataScale), Color: "#FFFFFF", Shadow: shadow(),
 		Align: "left", LineSpacing: 1.5, MaxWidthPct: 0.9}, ctx)
 	drawAt(dc, prImg, leftX, addrTop+contentH(addrImg, aM)+int(0.02*H), prM)
@@ -361,8 +382,16 @@ func drawCreamGrid(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderCo
 	// hẹp – phải rộng), cao gần hết khung, GÓC VUÔNG.
 	margin := 0.05 * W
 	gap := 0.012 * W
+	// Lưới bắt đầu NGAY DƯỚI địa chỉ thật: địa chỉ dài (wrap 2 dòng) sẽ đẩy lưới
+	// xuống thay vì bị đè lên. Đáy lưới giữ cố định 0.77H để khối tiện ích/giá
+	// phía dưới không xê dịch; lưới chỉ co lại khi address chiếm nhiều dòng.
+	addrBottom := float64(addrTop + contentH(addrImg, aM))
 	gridTop := 0.18 * H
-	gridH := 0.59 * H
+	if minTop := addrBottom + 0.018*H; minTop > gridTop {
+		gridTop = minTop
+	}
+	gridBottom := 0.77 * H
+	gridH := gridBottom - gridTop
 	availW := W - 2*margin - gap
 	cellH := (gridH - gap) / 2
 	topL, botL := 0.57*availW, 0.41*availW
@@ -429,7 +458,7 @@ func drawFilmstrip(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderCo
 		Text: strings.TrimSpace(cfg.Address), FontFile: "PlayfairDisplay-Bold.ttf", SizePct: 0.038,
 		Color:  "#F6F2ED",
 		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.6, Blur: 6, OffsetY: 2},
-		Align:  "center", MaxWidthPct: 0.9, Curve: 12,
+		Align:  "center", MaxWidthPct: 0.8, Curve: 12, // chừa chỗ cho vòng cung uốn
 	}, ctx)
 	titleImg, tM := renderElFitWidth(&textrender.ElementStyle{
 		Text: cfg.Title, FontFile: "PlayfairDisplay-Bold.ttf", SizePct: 0.10 * scaleOr(cfg.TitleScale),
@@ -479,6 +508,7 @@ func contentW(img image.Image, m int) int {
 // this two-pass fit. st.MaxWidthPct is cleared to suppress wrapping.
 func renderElFitWidth(st *textrender.ElementStyle, ctx *textrender.RenderContext, maxFrac float64) (image.Image, int) {
 	st.MaxWidthPct = 0
+	st.NoWrap = true // fit-to-width = một dòng; tắt auto-wrap mặc định của renderer
 	img, m := renderEl(st, ctx)
 	if img == nil {
 		return img, m

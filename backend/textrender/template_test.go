@@ -10,7 +10,7 @@ func TestListTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTemplates: %v", err)
 	}
-	want := map[string]bool{"daiky": true, "sunset": true, "bold": true}
+	want := map[string]bool{"daiky": true, "sunset": true}
 	got := map[string]bool{}
 	for _, tt := range list {
 		got[tt.Name] = true
@@ -35,7 +35,7 @@ func TestRenderAllTemplates(t *testing.T) {
 		"listing_id": "ID 12345",
 		"watermark":  "@yourchannel",
 	}
-	for _, name := range []string{"daiky", "sunset", "bold"} {
+	for _, name := range []string{"daiky", "sunset"} {
 		tmpl, err := LoadTemplate(name, "../assets/templates")
 		if err != nil {
 			t.Errorf("load %s: %v", name, err)

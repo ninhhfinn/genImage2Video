@@ -46,6 +46,9 @@ func renderTextOverlays(cfg Config, tmpDir string) ([]OverlayPlan, error) {
 	if tmplName == "" {
 		return nil, nil
 	}
+	// Giới hạn ≈5–6 tiện ích đầu cho MỌI template video (Go-code + JSON) — tránh
+	// khối tiện ích dài đè/tràn. Áp trước khi rẽ nhánh để cả 2 đường đều thấy.
+	cfg.Amenities = capAmenities(cfg.Amenities, maxAmenities)
 	// Template Go-code (v2): vẽ composite đầy đủ icon/hiệu ứng như mockup duyệt.
 	if plans, ok, err := renderVideoTemplateComposite(cfg, tmpDir); ok {
 		return plans, err
@@ -63,6 +66,9 @@ func renderTextOverlays(cfg Config, tmpDir string) ([]OverlayPlan, error) {
 		VideoWidth:  cfg.Width,
 		VideoHeight: cfg.Height,
 		AssetsDir:   assetsDir(),
+		// Vùng an toàn TikTok cho đường overlay JSON (badge/panel): chừa cột nút
+		// phải 12%, caption đáy 18%, status đỉnh 9% — clamp ngay trong Render.
+		InsetLeftFrac: 0.05, InsetRightFrac: 0.12, InsetTopFrac: 0.09, InsetBottomFrac: 0.18,
 	}
 
 	titleEnable, listingEnable := "", ""
