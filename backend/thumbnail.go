@@ -128,6 +128,8 @@ type ThumbnailRequest struct {
 	Amenities []string `json:"amenities"`
 	Watermark string   `json:"watermark"`
 	Caption   string   `json:"caption"`
+	Brand     string   `json:"brand"`      // amber: wordmark góc trên-phải (vd "lag")
+	PageBadge string   `json:"page_badge"` // amber: badge số trang (vd "1/4")
 
 	Width  int `json:"width"`
 	Height int `json:"height"`
@@ -181,6 +183,7 @@ func thumbnailHandler(uploadDir, outputDir string) http.HandlerFunc {
 			Width: req.Width, Height: req.Height,
 			Title: req.Title, Address: req.Address, Prices: req.Prices,
 			Amenities: req.Amenities, Watermark: req.Watermark, Caption: req.Caption,
+			Brand: req.Brand, PageBadge: req.PageBadge,
 			TitleFont: req.TitleFont, TitleColor: req.TitleColor,
 			StrokeColor: req.StrokeColor, StrokeWidth: req.StrokeWidth,
 			BodyFont: req.BodyFont, BodyColor: req.BodyColor,
