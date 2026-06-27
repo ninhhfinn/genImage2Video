@@ -246,21 +246,25 @@ func drawAmber(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContex
 	// scrim đáy cho tiêu đề + pill địa chỉ
 	vGradient(dc, 0, H*0.55, W, H*0.45, color.NRGBA{10, 6, 4, 0}, color.NRGBA{10, 6, 4, 150})
 
-	// panel giá góc trên-trái
+	// panel giá góc trên-trái (panel nâu đặc bo góc, theo bản gốc Lagom)
 	if pr := strings.Join(trimNonEmpty(cfg.Prices), "\n"); pr != "" {
 		img, m := renderEl(&textrender.ElementStyle{
 			Text: pr, FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.0235 * scaleOr(cfg.DataScale),
 			Color: "#FFFFFF",
-			Bg:    &textrender.BgStyle{Color: "#5A4636", Alpha: 0.62, Radius: 20, Padding: [2]float64{16, 24}},
+			Bg:    &textrender.BgStyle{Color: "#7B4A38", Alpha: 0.80, Radius: 16, Padding: [2]float64{16, 24}},
 			Align: "left", LineSpacing: 1.6, MaxWidthPct: 0.55,
 		}, ctx)
 		drawAt(dc, img, int(0.05*W), int(0.045*H), m)
 	}
 
+	// cụm góc trên-phải: wordmark thương hiệu + badge số trang (vd "lag" "1/4").
+	// Chỉ vẽ khi được cấu hình — mặc định rỗng nên không ảnh hưởng dữ liệu cũ.
+	drawAmberPageBadge(dc, cfg, ctx, W, H)
+
 	// tiêu đề serif lớn canh trái-dưới. Dùng fit-to-width để TỰ CO vừa khung:
 	// tên dài 1 từ (vd "mangoapartment") không wrap được nên trước đây tràn viền.
 	titleImg, tM := renderElFitWidth(&textrender.ElementStyle{
-		Text: cfg.Title, FontFile: "PlayfairDisplay-Bold.ttf", SizePct: 0.125 * scaleOr(cfg.TitleScale),
+		Text: cfg.Title, FontFile: "Fraunces-DisplaySoft.ttf", SizePct: 0.135 * scaleOr(cfg.TitleScale),
 		Color: orStr(cfg.TitleColor, "#FFFFFF"),
 		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.5, Blur: 12, OffsetY: 4},
 		Align: "left",
@@ -270,8 +274,8 @@ func drawAmber(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContex
 	titleBottom := titleTop + contentH(titleImg, tM)
 	titleRight := int(0.05*W) + contentW(titleImg, tM)
 
-	// pill cam "Room" dưới-phải tiêu đề (Playfair đồng bộ tiêu đề)
-	if roomImg, rm := renderEl(&textrender.ElementStyle{Text: "Room", FontFile: "PlayfairDisplay-Bold.ttf",
+	// pill cam "Room" dưới-phải tiêu đề (Fraunces đồng bộ tiêu đề)
+	if roomImg, rm := renderEl(&textrender.ElementStyle{Text: "Room", FontFile: "Fraunces-DisplaySoft.ttf",
 		SizePct: 0.05, Color: "#FFFFFF",
 		Bg: &textrender.BgStyle{Color: "#E8852A", Alpha: 1, Radius: 26, Padding: [2]float64{10, 26}}, Align: "center"}, ctx); roomImg != nil {
 		drawAt(dc, roomImg, titleRight-contentW(roomImg, rm), titleBottom-int(0.012*H), rm)
@@ -292,6 +296,50 @@ func drawAmber(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContex
 			py := int(0.86 * H) // nâng khỏi mép đáy để địa chỉ wrap 2 dòng không lọt khung
 			dc.DrawImage(img, px-m, py-m)
 			drawPinIcon(dc, float64(px)+float64(lh)*0.5, float64(py)+float64(lh)*0.13, float64(lh)*0.6, color.NRGBA{255, 255, 255, 255})
+		}
+	}
+}
+
+// drawAmberPageBadge vẽ cụm góc trên-phải: wordmark thương hiệu + badge số trang
+// (vd "lag" và "1/4"), mô phỏng nhãn carousel của bản gốc Lagom. Chỉ vẽ khi có
+// cấu hình; cả hai rỗng = không vẽ gì (giữ tương thích dữ liệu cũ).
+func drawAmberPageBadge(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContext, W, H float64) {
+	badge := strings.TrimSpace(cfg.PageBadge)
+	brand := strings.TrimSpace(cfg.Brand)
+	if badge == "" && brand == "" {
+		return
+	}
+	rightX := int(0.955 * W)
+	topY := int(0.038 * H)
+	leftEdge := rightX
+
+	// badge số trang: ô bo góc kem, chữ nâu đậm, sát mép phải
+	if badge != "" {
+		img, m := renderEl(&textrender.ElementStyle{
+			Text: badge, FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.026,
+			Color: "#5A3A2A",
+			Bg:    &textrender.BgStyle{Color: "#E7D8BE", Alpha: 0.92, Radius: 12, Padding: [2]float64{8, 14}},
+			Align: "center",
+		}, ctx)
+		if img != nil {
+			w := contentW(img, m)
+			drawAt(dc, img, rightX-w, topY, m)
+			leftEdge = rightX - w
+		}
+	}
+
+	// wordmark thương hiệu: serif trắng có đổ bóng, đặt bên trái badge
+	if brand != "" {
+		img, m := renderEl(&textrender.ElementStyle{
+			Text: brand, FontFile: "PlayfairDisplay-Bold.ttf", SizePct: 0.04,
+			Color:  "#FFFFFF",
+			Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.45, Blur: 8, OffsetY: 2},
+			Align:  "right",
+		}, ctx)
+		if img != nil {
+			w := contentW(img, m)
+			gap := int(0.012 * W)
+			drawAt(dc, img, leftEdge-gap-w, topY-int(0.006*H), m)
 		}
 	}
 }

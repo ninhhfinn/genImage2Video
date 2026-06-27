@@ -270,6 +270,8 @@ func TestGenThumbMockups(t *testing.T) {
 			Title:     "Amoureux NK605",
 			Address:   "30 ngõ 169 Doãn Kế Thiện",
 			Prices:    []string{"Giá giờ: 369K/2H", "Giá đêm/ngày: 559K", "Giá ngày/đêm: 659K"},
+			Brand:     "lag",
+			PageBadge: "1/4",
 			Watermark: "",
 		}, pick(2)},
 		{"thumb-3-strip.jpg", ThumbnailConfig{
