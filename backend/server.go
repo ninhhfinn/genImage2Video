@@ -100,6 +100,7 @@ func startWebServer(port int) error {
 	mux.HandleFunc("/api/history", historyHandler())
 	mux.HandleFunc("/api/export-excel", exportExcelHandler(outputDir, port))
 	mux.HandleFunc("/api/parse-listings", parseListingsHandler())
+	mux.HandleFunc("/api/dayladau-listings", dayladauListingsHandler())
 	mux.HandleFunc("/api/select-listing", selectListingHandler(uploadDir))
 	mux.HandleFunc("/api/templates", listTemplatesHandler())
 	mux.HandleFunc("/api/render-thumbnail", thumbnailHandler(uploadDir, outputDir))

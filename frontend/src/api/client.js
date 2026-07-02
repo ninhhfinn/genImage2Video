@@ -14,6 +14,10 @@ export const uploadImages = (files) => {
 export const parseListings = (body) =>
   api.post('/parse-listings', body)
 
+// Dayladau-only loader: server builds the v1/listings URL from date/guest params.
+export const fetchDayladau = (body) =>
+  api.post('/dayladau-listings', body, { timeout: 60000 })
+
 export const selectListing = (body) =>
   api.post('/select-listing', body, { timeout: 120000 }) // many photos + retries can be slow; backend caps concurrency/attempts
 

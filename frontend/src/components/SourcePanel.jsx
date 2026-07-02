@@ -1,11 +1,20 @@
 import { useState, useRef } from 'react'
-import { uploadImages, parseListings, selectListing } from '../api/client'
+import { uploadImages, parseListings, selectListing, fetchDayladau } from '../api/client'
+
+// Local-date helpers for the Dayladau date pickers (avoid UTC shift from toISOString).
+const pad = n => String(n).padStart(2, '0')
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const TODAY = ymd(new Date())
+const TOMORROW = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return ymd(d) })()
 
 export default function SourcePanel({ onReady, onMultiSelect, toast, photoLimit }) {
-  const [tab, setTab]       = useState('upload')
+  const [tab, setTab]       = useState('dayladau')
   const [drag, setDrag]     = useState(false)
   const [apiUrl, setApiUrl] = useState('')
   const [apiJson, setApiJson] = useState('')
+  const [checkin, setCheckin]   = useState(TODAY)
+  const [checkout, setCheckout] = useState(TOMORROW)
+  const [guests, setGuests]     = useState(2)
   const [listings, setListings] = useState([])
   const [checked, setChecked]   = useState(new Set())
   const [singleId, setSingleId] = useState(null)
@@ -29,6 +38,40 @@ export default function SourcePanel({ onReady, onMultiSelect, toast, photoLimit 
       onReady([{ count: data.count, uploaded: true, name: 'Upload' }])
       toast(`Đã tải ${data.count} ảnh ✓`)
     } catch (e) { toast(e.message, 'err') }
+  }
+
+  // ── Load listings từ Dayladau (app dùng riêng cho dayladau) ──
+  const loadDayladau = async () => {
+    if (checkin > checkout) { toast('Ngày trả phòng phải sau ngày nhận', 'err'); return }
+    setLoadingL(true)
+    setApiError(null)
+    try {
+      const { data } = await fetchDayladau({
+        checkin, checkout, guests: Number(guests) || 2, limit: 20, offset: 1,
+      })
+      if (data.error) {
+        const errInfo = { title: data.error, details: data.details || 'Backend không trả details.', source: 'Dayladau API' }
+        console.error('[dayladau] backend error', data)
+        setApiError(errInfo)
+        toast(data.error, 'err')
+        return
+      }
+      setListings(data.listings || [])
+      setChecked(new Set())
+      toast(`Tìm thấy ${data.count} listing từ Dayladau`)
+    } catch (e) {
+      const status = e.response?.status
+      const data = e.response?.data
+      const errInfo = {
+        title: status ? `Lỗi HTTP ${status}` : 'Không gọi được backend',
+        details: data?.details || data?.error || e.message,
+        source: 'Dayladau API',
+      }
+      console.error('[dayladau] request failed', e)
+      setApiError(errInfo)
+      toast(errInfo.title, 'err')
+    }
+    finally { setLoadingL(false) }
   }
 
   // ── Load listings từ URL ──
@@ -152,9 +195,40 @@ export default function SourcePanel({ onReady, onMultiSelect, toast, photoLimit 
   return (
     <div>
       <div className="tabs">
+        <button className={`tab${tab==='dayladau'?' on':''}`} onClick={()=>setTab('dayladau')}>🏠 Dayladau</button>
         <button className={`tab${tab==='upload'?' on':''}`} onClick={()=>setTab('upload')}>⬆ Tải lên</button>
         <button className={`tab${tab==='api'?' on':''}`} onClick={()=>setTab('api')}>🔗 URL API</button>
       </div>
+
+      {/* ── Dayladau (mặc định) ── */}
+      {tab==='dayladau' && (
+        <div>
+          <div style={{display:'flex',gap:10,alignItems:'flex-end'}}>
+            <label style={{flex:1,display:'flex',flexDirection:'column',gap:4,fontSize:12,fontWeight:600}}>
+              Nhận phòng <span style={{color:'var(--muted,#999)',fontWeight:400}}>14:00</span>
+              <input type="date" className="inp" value={checkin} onChange={e=>setCheckin(e.target.value)}/>
+            </label>
+            <label style={{flex:1,display:'flex',flexDirection:'column',gap:4,fontSize:12,fontWeight:600}}>
+              Trả phòng <span style={{color:'var(--muted,#999)',fontWeight:400}}>11:00</span>
+              <input type="date" className="inp" value={checkout} onChange={e=>setCheckout(e.target.value)}/>
+            </label>
+            <label style={{width:78,display:'flex',flexDirection:'column',gap:4,fontSize:12,fontWeight:600}}>
+              Khách
+              <select className="inp" value={guests} onChange={e=>setGuests(e.target.value)}>
+                {[1,2,3,4,5,6,8,10].map(n=><option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+          </div>
+          <button
+            className="btn btn-gold"
+            style={{width:'100%',marginTop:12}}
+            onClick={loadDayladau}
+            disabled={loadingL}
+          >
+            {loadingL ? <><span className="spin">⟳</span> Đang tải…</> : '🏠 Tải listing từ Dayladau'}
+          </button>
+        </div>
+      )}
 
       {/* ── Upload ── */}
       {tab==='upload' && (
@@ -194,13 +268,15 @@ export default function SourcePanel({ onReady, onMultiSelect, toast, photoLimit 
             onChange={e=>setApiJson(e.target.value)}
             style={{minHeight:90}}
           />
-          {apiError && (
-            <div className="api-error">
-              <div className="api-error-title">{apiError.title}</div>
-              {apiError.source && <div className="api-error-line">Nguồn: {apiError.source}</div>}
-              <pre>{apiError.details}</pre>
-            </div>
-          )}
+        </div>
+      )}
+
+      {/* ── Lỗi tải listing (Dayladau / URL API) ── */}
+      {apiError && (
+        <div className="api-error">
+          <div className="api-error-title">{apiError.title}</div>
+          {apiError.source && <div className="api-error-line">Nguồn: {apiError.source}</div>}
+          <pre>{apiError.details}</pre>
         </div>
       )}
 

@@ -684,6 +684,98 @@ func parseListingsHandler() http.HandlerFunc {
 	}
 }
 
+// dayladauListingsHandler builds the dayladau v1/listings URL from date/guest
+// params and returns parsed listings. The app is dayladau-only, so this saves
+// the user from pasting the full API URL every time.
+func dayladauListingsHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "method not allowed", 405)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+
+		var body struct {
+			Checkin  string `json:"checkin"`
+			Checkout string `json:"checkout"`
+			Guests   int    `json:"guests"`
+			Limit    int    `json:"limit"`
+			Offset   int    `json:"offset"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			log.Printf("[dayladau] invalid request body: %v", err)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid body", "details": err.Error()})
+			return
+		}
+
+		apiURL := buildDayladauURL(body.Checkin, body.Checkout, body.Guests, body.Limit, body.Offset)
+		log.Printf("[dayladau] fetch url=%s", apiURL)
+
+		rawJSON, err := fetchRawJSON(apiURL, nil)
+		if err != nil {
+			log.Printf("[dayladau] fetch failed url=%s error=%v", apiURL, err)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Không tải được Dayladau", "details": err.Error()})
+			return
+		}
+
+		listings := parseListings(rawJSON)
+		if len(listings) == 0 {
+			log.Printf("[dayladau] parse empty bytes=%d preview=%q", len(rawJSON), rawPreview(rawJSON, 600))
+			json.NewEncoder(w).Encode(map[string]string{
+				"error":   "không tìm thấy listing nào",
+				"details": "Dayladau không trả listing có ảnh cho khoảng thời gian/số khách này.",
+			})
+			return
+		}
+
+		log.Printf("[dayladau] parsed listings=%d", len(listings))
+		json.NewEncoder(w).Encode(map[string]interface{}{"listings": listings, "count": len(listings)})
+	}
+}
+
+// buildDayladauURL constructs the dayladau v1/listings query. It drops the
+// shorten flag so each listing returns its full photo gallery (needed for a
+// video), and uses a fresh _updated timestamp as a cache-buster.
+func buildDayladauURL(checkin, checkout string, guests, limit, offset int) string {
+	if guests <= 0 {
+		guests = 2
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset <= 0 {
+		offset = 1
+	}
+	now := time.Now()
+	if strings.TrimSpace(checkin) == "" {
+		checkin = now.Format("2006-01-02")
+	}
+	if strings.TrimSpace(checkout) == "" {
+		checkout = now.AddDate(0, 0, 1).Format("2006-01-02")
+	}
+
+	q := url.Values{}
+	q.Set("_updated", strconv.FormatInt(now.UnixMilli(), 10))
+	q.Set("number_of_guests", strconv.Itoa(guests))
+	q.Set("is_suggest_special_offer_time", "false")
+	q.Set("limit", strconv.Itoa(limit))
+	q.Set("offset", strconv.Itoa(offset))
+	q.Set("start_time_v2", dayladauTime(checkin, "1400"))
+	q.Set("end_time_v2", dayladauTime(checkout, "1100"))
+	q.Set("is_suggest_promotion", "true")
+	return "https://api.dayladau.com/v1/listings?" + q.Encode()
+}
+
+// dayladauTime turns a "2026-06-23" date into the API's "2026-06-23T1400"
+// form; values that already carry a T<time> suffix pass through unchanged.
+func dayladauTime(date, hour string) string {
+	date = strings.TrimSpace(date)
+	if date == "" || strings.Contains(date, "T") {
+		return date
+	}
+	return date + "T" + hour
+}
+
 func rawPreview(raw []byte, limit int) string {
 	s := strings.TrimSpace(string(raw))
 	if len(s) <= limit {
