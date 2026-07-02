@@ -66,7 +66,7 @@ type Config struct {
 	GridIntro    bool     // chèn 1 frame lưới 2x2 tĩnh ở đầu video rồi về Ken Burns
 
 	// Template system (mới — thay thế OverlayStyle dần)
-	Template     string                              // "daiky" | "sunset" | "bold"
+	Template     string                              // "daiky" | "sunset"
 	CustomStyles map[string]*textrender.ElementStyle // override per-element
 
 	// Tự đăng social qua webhook (Make.com / n8n) sau khi render xong
@@ -158,6 +158,27 @@ func effectIsRandom(cfg Config) bool {
 		}
 	}
 	return false
+}
+
+// pickRandomVideoTemplate trả về tên 1 template video ngẫu nhiên trong
+// assets/templates (đúng danh sách mà picker hiển thị). Dùng khi user chọn
+// "random": mỗi video sẽ tự bốc 1 mẫu. Fallback "daiky" nếu không đọc được.
+func pickRandomVideoTemplate() string {
+	list, err := textrender.ListTemplates(assetsTemplatesDir())
+	if err != nil || len(list) == 0 {
+		return "daiky"
+	}
+	names := make([]string, 0, len(list))
+	for _, t := range list {
+		if strings.EqualFold(t.Name, "random") {
+			continue
+		}
+		names = append(names, t.Name)
+	}
+	if len(names) == 0 {
+		return "daiky"
+	}
+	return names[rand.Intn(len(names))]
 }
 
 func imageOrientation(path string) (string, error) {

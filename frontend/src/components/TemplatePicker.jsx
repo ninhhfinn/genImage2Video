@@ -2,10 +2,13 @@ import { useState, useEffect } from 'react'
 import { fetchTemplates } from '../api/templates'
 
 const EMOJI = {
+  random:  '🎲',
   daiky:   '🏡',
   sunset:  '🌅',
-  bold:    '⚫',
 }
+
+// "Random" = mẫu ảo: không phải file template, backend tự bốc 1 mẫu thật cho mỗi video.
+const RANDOM = { name: 'random', display_name: 'Random', description: 'Mỗi video tự chọn ngẫu nhiên 1 mẫu' }
 
 export default function TemplatePicker({ value, onChange }) {
   const [templates, setTemplates] = useState([])
@@ -22,7 +25,7 @@ export default function TemplatePicker({ value, onChange }) {
       <label className="flabel">Mẫu thiết kế (Template)</label>
       {err && <div style={{fontSize:10, color:'var(--red)', marginBottom:4}}>{err}</div>}
       <div className="template-grid">
-        {templates.map(t => (
+        {[RANDOM, ...templates].map(t => (
           <button
             type="button"
             key={t.name}

@@ -13,10 +13,14 @@ function downloadUrlToDisk(url, filename) {
 
 // ── RenderPanel ─────────────────────────────────────────────────────────
 export function RenderPanel({ canRender, onRender, rendering, done, pct, progText, status, error, queue, isQueueMode,
-  canThumbnail, onThumbnail, thumbBusy, thumbUrl, thumbErr }) {
+  batchMode = 'both', canThumbnail, onThumbnail, thumbBusy, thumbUrl, thumbErr }) {
   const pendingCount = queue?.filter(q => q.status==='pending').length || 0
   const doneCount    = queue?.filter(q => q.status==='done').length    || 0
   const totalCount   = queue?.length || 0
+  // Listing đơn: nhãn nút đổi theo chế độ xuất đã chọn.
+  const singleLabel = batchMode === 'video'     ? '🚀  Tạo video'
+                    : batchMode === 'thumbnail' ? '🖼️  Tạo thumbnail'
+                    :                             '🚀  Tạo video + ảnh bìa'
 
   return (
     <div className="render-panel">
@@ -28,7 +32,7 @@ export function RenderPanel({ canRender, onRender, rendering, done, pct, progTex
             : isQueueMode && pendingCount === 0
               ? '✅  Tất cả đã xong'
               : canRender
-                ? '🚀  Tạo video'
+                ? singleLabel
                 : 'Chọn ảnh trước'}
       </button>
 

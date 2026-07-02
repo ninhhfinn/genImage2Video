@@ -270,6 +270,12 @@ func renderHandler(uploadDir, outputDir string) http.HandlerFunc {
 			req.Width, req.Height = 1080, 1920
 		}
 
+		// "random" → backend tự bốc 1 template video thật (mỗi video 1 mẫu).
+		if strings.EqualFold(strings.TrimSpace(req.Template), "random") {
+			req.Template = pickRandomVideoTemplate()
+			fmt.Printf("🎲  Template random → %s\n", req.Template)
+		}
+
 		outputFile := filepath.Join(outputDir, "output.mp4")
 		cfg := Config{
 			Input:         uploadDir,

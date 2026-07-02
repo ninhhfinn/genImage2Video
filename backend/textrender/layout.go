@@ -54,6 +54,27 @@ func wrapText(dc *gg.Context, text string, maxWidth float64) []string {
 		words := strings.Fields(paragraph)
 		current := ""
 		for _, w := range words {
+			// A single token wider than maxWidth can never fit on a line; hard-break
+			// it rune-by-rune so a long price/URL/nickname wraps instead of running
+			// off-canvas (the space-join path below only breaks BETWEEN words).
+			if ww, _ := dc.MeasureString(w); ww > maxWidth {
+				if current != "" {
+					out = append(out, current)
+					current = ""
+				}
+				chunk := ""
+				for _, r := range w {
+					next := chunk + string(r)
+					if cw, _ := dc.MeasureString(next); cw > maxWidth && chunk != "" {
+						out = append(out, chunk)
+						chunk = string(r)
+					} else {
+						chunk = next
+					}
+				}
+				current = chunk
+				continue
+			}
 			candidate := w
 			if current != "" {
 				candidate = current + " " + w
@@ -106,6 +127,22 @@ func resolvePosition(p Position, elemW, elemH, canvasW, canvasH int) (int, int) 
 	x := resolveAxis(p.X, elemW, canvasW, true)
 	y := resolveAxis(p.Y, elemH, canvasH, false)
 	return x, y
+}
+
+// clampPos keeps a box of length `size` within [inset0, dim-inset1] on one axis.
+// If the box is wider than the usable span it is centered in the full dimension
+// (it cannot fit either way — centered reads better than jammed against a rail).
+func clampPos(pos, size, dim, inset0, inset1 int) int {
+	if size >= dim-inset0-inset1 {
+		return (dim - size) / 2
+	}
+	if pos < inset0 {
+		return inset0
+	}
+	if pos+size > dim-inset1 {
+		return dim - inset1 - size
+	}
+	return pos
 }
 
 func resolveAxis(spec string, elemSize, canvasSize int, isX bool) int {

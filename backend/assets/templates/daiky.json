@@ -150,7 +150,7 @@
       "color": "#FFFFFF",
       "position": {
         "x": "center",
-        "y": "0.92"
+        "y": "0.70"
       },
       "align": "center"
     },
@@ -166,10 +166,10 @@
         "offset_y": 1
       },
       "position": {
-        "x": "right",
-        "y": "0.85"
+        "x": "center",
+        "y": "0.74"
       },
-      "align": "right"
+      "align": "center"
     }
   },
   "stack": {

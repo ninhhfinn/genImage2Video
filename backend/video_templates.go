@@ -38,7 +38,9 @@ func renderVideoTemplateComposite(cfg Config, tmpDir string) (plans []OverlayPla
 	if W <= 0 || H <= 0 {
 		return nil, true, fmt.Errorf("video template %s: thiếu kích thước video", name)
 	}
-	ctx := &textrender.RenderContext{VideoWidth: W, VideoHeight: H, AssetsDir: assetsDir()}
+	ctx := &textrender.RenderContext{VideoWidth: W, VideoHeight: H, AssetsDir: assetsDir(),
+		// Vùng an toàn TikTok: chừa cột nút phải 12%, caption đáy 18%, status đỉnh 9%.
+		InsetLeftFrac: 0.05, InsetRightFrac: 0.12, InsetTopFrac: 0.09, InsetBottomFrac: 0.18}
 
 	dc := gg.NewContext(W, H)
 	dc.SetRGBA(0, 0, 0, 0)
@@ -59,16 +61,16 @@ func renderVideoTemplateComposite(cfg Config, tmpDir string) (plans []OverlayPla
 		drawChillVideo(dc, ctx, cfg)
 	}
 
-	// watermark góc dưới phải (editorial dùng watermark làm brand trên đỉnh)
+	// Watermark + listing_id giữ trong VÙNG AN TOÀN TikTok (canh giữa, ~0.74/0.70H).
+	// Vị trí cũ (góc dưới-phải 0.86H / đáy 0.93H) bị caption · nav · cột nút che.
+	// Editorial vẫn dùng watermark làm brand trên đỉnh (bỏ qua ở đây).
 	if wm := strings.TrimSpace(cfg.Watermark); wm != "" && name != "editorial" {
 		img, m := renderEl(&textrender.ElementStyle{
 			Text: wm, FontFile: "BeVietnamPro-Regular.ttf", SizePct: 0.02, Color: "#FFFFFF",
 			Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.6, Blur: 4, OffsetX: 1, OffsetY: 1},
-			Align:  "right",
+			Align:  "center",
 		}, ctx)
-		if img != nil {
-			drawRight(dc, img, int(0.96*float64(W)), int(0.86*float64(H)), m)
-		}
+		drawCX(dc, img, W, int(0.74*float64(H)), m)
 	}
 	if id := strings.TrimSpace(cfg.ListingID); id != "" {
 		img, m := renderEl(&textrender.ElementStyle{
@@ -76,7 +78,7 @@ func renderVideoTemplateComposite(cfg Config, tmpDir string) (plans []OverlayPla
 			Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.6, Blur: 4, OffsetX: 0.7, OffsetY: 1.4},
 			Align:  "center",
 		}, ctx)
-		drawCX(dc, img, W, int(0.93*float64(H)), m)
+		drawCX(dc, img, W, int(0.70*float64(H)), m)
 	}
 
 	path := filepath.Join(tmpDir, "composite.png")
@@ -191,15 +193,19 @@ func drawExtrude(dc *gg.Context, ctx *textrender.RenderContext, text, font strin
 
 // drawPriceDoors vẽ các dòng giá, mỗi dòng kèm icon cá cam phía sau.
 // Dòng "" = khoảng giãn cách nhóm. leftAlign=false → căn giữa quanh anchorX.
-func drawPriceDoors(dc *gg.Context, ctx *textrender.RenderContext, lines []string, font string, size float64, col string, leftAlign bool, anchorX, yTop, gap int) int {
+func drawPriceDoors(dc *gg.Context, ctx *textrender.RenderContext, lines []string, font string, size float64, col string, leftAlign bool, anchorX, yTop, gap int, maxWidthPct float64) int {
 	fishBody := color.NRGBA{0xF2, 0x8C, 0x3B, 255}
+	safeBottom := int(0.82 * float64(ctx.VideoHeight)) // không cho bảng giá lấn vùng caption
 	cy := yTop
 	for _, ln := range lines {
 		if ln == "" {
 			cy += gap
 			continue
 		}
-		img, m := renderEl(&textrender.ElementStyle{Text: ln, FontFile: font, SizePct: size, Color: col, Shadow: strongVShadow(), Align: "left"}, ctx)
+		if cy > safeBottom { // hết chỗ an toàn → dừng, không vẽ tràn xuống đáy
+			break
+		}
+		img, m := renderEl(&textrender.ElementStyle{Text: ln, FontFile: font, SizePct: size, Color: col, Shadow: strongVShadow(), Align: "left", MaxWidthPct: maxWidthPct}, ctx)
 		if img == nil {
 			continue
 		}
@@ -233,28 +239,28 @@ func drawStaycationVideo(dc *gg.Context, ctx *textrender.RenderContext, cfg Conf
 	if d := districtFromAddress(cfg.Address); d != "" {
 		eyR, mR := renderEl(&textrender.ElementStyle{Text: d, FontFile: "DancingScript-Variable.ttf",
 			SizePct: 0.052, Color: "#FFFFFF", Shadow: softVShadow(), Align: "left"}, ctx)
-		drawRight(dc, eyR, int(0.95*W), int(0.27*H), mR)
+		drawRight(dc, eyR, int(0.88*W), int(0.27*H), mR) // mép phải ≤ 0.88W, tránh cột nút TikTok
 	}
 
-	titleFont := "YesevaOne-Regular.ttf"
+	titleFont := "PlayfairDisplay-Bold.ttf" // serif đậm, số "4" kín (đồng bộ thumbnail)
 	if cfg.TitleFontFile != "" {
 		titleFont = cfg.TitleFontFile
 	}
 	tSt := &textrender.ElementStyle{Text: videoNickname(cfg), FontFile: titleFont,
-		SizePct: 0.082, Color: "#FFFFFF", Shadow: softVShadow(), Align: "left", MaxWidthPct: 0.9}
+		SizePct: 0.082, Color: "#FFFFFF", Shadow: softVShadow(), Align: "left", MaxWidthPct: 0.80}
 	adaptFont(tSt)
 	title, mT := renderEl(tSt, ctx)
 	drawAt(dc, title, xL, int(0.315*H), mT)
 
 	sub, mS := renderEl(&textrender.ElementStyle{Text: strings.Join(trimNonEmpty(cfg.Amenities), ", "),
 		FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.0265 * bs, Color: "#FFFFFF", Shadow: strongVShadow(),
-		Align: "left", MaxWidthPct: 0.9}, ctx)
+		Align: "left", MaxWidthPct: 0.80}, ctx)
 	drawAt(dc, sub, xL+int(0.012*W), int(0.405*H), mS)
 
 	pr, mP := renderEl(&textrender.ElementStyle{
 		Text:     strings.Join(priceGroups(cfg.Prices), "\n"),
-		FontFile: "Prata-Regular.ttf", SizePct: 0.030 * bs, Color: "#FFFFFF", Shadow: strongVShadow(),
-		Align: "left", LineSpacing: 1.45, MaxWidthPct: 0.9}, ctx)
+		FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.030 * bs, Color: "#FFFFFF", Shadow: strongVShadow(),
+		Align: "left", LineSpacing: 1.45, MaxWidthPct: 0.80}, ctx)
 	drawAt(dc, pr, xL+int(0.012*W), int(0.46*H), mP)
 }
 
@@ -274,17 +280,17 @@ func drawCreampillVideo(dc *gg.Context, ctx *textrender.RenderContext, cfg Confi
 		top, mt := renderEl(&textrender.ElementStyle{Text: strings.Join(flat, "   -   "),
 			FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.024 * bs, Color: "#FFFFFF",
 			Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.75, Blur: 7, OffsetY: 2},
-			Align:  "center", MaxWidthPct: 0.92}, ctx)
+			Align:  "center", MaxWidthPct: 0.88}, ctx)
 		drawCX(dc, top, W, int(0.165*H), mt)
 	}
 
-	pillFont := "Inter-Bold.ttf"
+	pillFont := "PlayfairDisplay-Bold.ttf" // serif đậm, số "4" kín (thay Inter "4" hở đỉnh)
 	if cfg.TitleFontFile != "" {
 		pillFont = cfg.TitleFontFile
 	}
 	pill, mp := renderEl(&textrender.ElementStyle{Text: videoNickname(cfg), FontFile: pillFont,
 		SizePct: 0.064, Color: "#D33B2C",
-		Bg:     &textrender.BgStyle{Color: "#FBE6C2", Alpha: 0.97, Radius: 22, Padding: [2]float64{16, 40}},
+		Bg:     &textrender.BgStyle{Color: "#FBE6C2", Alpha: 0.80, Radius: 22, Padding: [2]float64{16, 40}},
 		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.35, Blur: 12, OffsetY: 5},
 		Align:  "center", MaxWidthPct: 0.92}, ctx)
 	drawCX(dc, pill, W, int(0.205*H), mp)
@@ -308,23 +314,35 @@ func drawGoldSerifVideo(dc *gg.Context, ctx *textrender.RenderContext, cfg Confi
 		Align: "center", MaxWidthPct: 0.9}, ctx)
 	drawCX(dc, addr, W, int(0.155*H), ma)
 
-	titleFont := "YesevaOne-Regular.ttf"
+	titleFont := "PlayfairDisplay-Bold.ttf" // serif đậm, số "4" kín (thay YesevaOne)
 	if cfg.TitleFontFile != "" {
 		titleFont = cfg.TitleFontFile
 	}
 	tSt := &textrender.ElementStyle{Text: videoNickname(cfg), FontFile: titleFont,
 		SizePct: 0.078, Color: gold, Stroke: &textrender.StrokeStyle{Color: "#FFFFFF", Width: 4.5, Alpha: 1},
-		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.5, Blur: 8, OffsetY: 3}, Align: "center", MaxWidthPct: 0.94}
+		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.5, Blur: 8, OffsetY: 3}, Align: "center", MaxWidthPct: 0.88}
 	adaptFont(tSt)
 	title, mt := renderEl(tSt, ctx)
-	drawCX(dc, title, W, int(0.175*H), mt)
+	// Title chảy NGAY DƯỚI address: address dài (wrap 2 dòng) không còn đè title.
+	titleTop := 0.175 * H
+	if b := 0.155*H + float64(contentH(addr, ma)) + 0.006*H; b > titleTop {
+		titleTop = b
+	}
+	drawCX(dc, title, W, int(titleTop), mt)
 
 	// Dòng không chứa chữ số = header mục (vàng, to hơn); còn lại trắng.
+	// Bảng giá chảy dưới title (đẩy xuống nếu title bị address đẩy xuống).
 	cy := int(0.265 * H)
+	if b := int(titleTop + float64(contentH(title, mt)) + 0.03*H); b > cy {
+		cy = b
+	}
 	first := true
 	for _, ln := range priceGroups(cfg.Prices) {
 		if ln == "" {
 			continue
+		}
+		if cy > int(0.82*H) { // dừng trước vùng caption đáy
+			break
 		}
 		isHeader := !strings.ContainsAny(ln, "0123456789")
 		col, size := "#FFFFFF", 0.024*bs
@@ -360,15 +378,16 @@ func drawEditorialVideo(dc *gg.Context, ctx *textrender.RenderContext, cfg Confi
 		titleFont = cfg.TitleFontFile
 	}
 	big, mb := renderElFitWidth(&textrender.ElementStyle{Text: videoNickname(cfg), FontFile: titleFont,
-		SizePct: 0.135, Color: "#FFFFFF", Shadow: softVShadow(), Align: "left", Curve: 22}, ctx, 0.88)
+		SizePct: 0.135, Color: "#FFFFFF", Shadow: softVShadow(), Align: "left", Curve: 22}, ctx, 0.82)
 	drawAt(dc, big, xL, int(0.115*H), mb)
 	bigBottom := int(0.115*H) + contentH(big, mb)
 	bigRight := xL + contentW(big, mb)
 
-	// chữ script "room" ép dưới-phải, ngay dưới baseline tiêu đề
+	// chữ script "room" ép dưới-phải, ngay dưới baseline tiêu đề (kẹp mép phải ≤ 0.86W)
 	script, ms := renderEl(&textrender.ElementStyle{Text: "room", FontFile: "DancingScript-Variable.ttf",
 		SizePct: 0.078, Color: "#FFFFFF", Shadow: softVShadow(), Align: "left"}, ctx)
-	drawAt(dc, script, bigRight-contentW(script, ms)+int(0.04*W), bigBottom-int(0.006*H), ms)
+	drawAtClamped(dc, script, bigRight-contentW(script, ms)+int(0.04*W), bigBottom-int(0.006*H), ms,
+		int(W), int(H), int(0.14*W), int(0.18*H))
 
 	addrY := bigBottom + int(0.055*H)
 	addr, ma := renderEl(&textrender.ElementStyle{Text: strings.TrimSpace(cfg.Address),
@@ -382,10 +401,12 @@ func drawEditorialVideo(dc *gg.Context, ctx *textrender.RenderContext, cfg Confi
 	panel, mp := renderEl(&textrender.ElementStyle{
 		Text:     strings.Join(priceGroups(cfg.Prices), "\n"),
 		FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.023 * bs, Color: "#3A352F",
-		Bg:     &textrender.BgStyle{Color: "#F7F1E6", Alpha: 0.82, Radius: 24, Padding: [2]float64{20, 28}},
-		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.28, Blur: 12, OffsetY: 5}, Align: "left", LineSpacing: 1.6,
+		Bg:     &textrender.BgStyle{Color: "#F7F1E6", Alpha: 0.72, Radius: 24, Padding: [2]float64{18, 26}},
+		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.28, Blur: 12, OffsetY: 5}, Align: "left", LineSpacing: 1.4,
 		MaxWidthPct: 0.46}, ctx)
-	drawRight(dc, panel, int(0.96*W), int(0.40*H), mp)
+	// Mép phải panel kéo về 0.77W (trong vùng an toàn) thay vì 0.96W — tránh cột
+	// nút like/comment/share của TikTok che mất bảng giá.
+	drawRight(dc, panel, int(0.77*W), int(0.40*H), mp)
 }
 
 // ─── 5. marquee ───────────────────────────────────────────────────────────────
@@ -423,7 +444,7 @@ func drawMarqueeVideo(dc *gg.Context, ctx *textrender.RenderContext, cfg Config)
 	}
 
 	yTop := homeBottom + int(0.075*H)
-	drawPriceDoors(dc, ctx, priceGroups(cfg.Prices), "BeVietnamPro-Bold.ttf", 0.024*bs, "#FFFFFF", false, W/2, yTop, int(0.012*H))
+	drawPriceDoors(dc, ctx, priceGroups(cfg.Prices), "BeVietnamPro-Bold.ttf", 0.024*bs, "#FFFFFF", false, W/2, yTop, int(0.012*H), 0.76)
 }
 
 // ─── 6. chillgreen ────────────────────────────────────────────────────────────
@@ -491,5 +512,6 @@ func drawChillVideo(dc *gg.Context, ctx *textrender.RenderContext, cfg Config) {
 
 	yTop := y2 + int(0.04*H)
 	leftX := int(0.28 * float64(W))
-	drawPriceDoors(dc, ctx, priceGroups(cfg.Prices), "BeVietnamPro-Bold.ttf", 0.023*bs, "#FFFFFF", true, leftX, yTop, int(0.011*H))
+	// mw 0.55: leftX(0.28W)+0.55W = 0.83W ≤ 0.88W rail → dòng combo dài wrap, không tràn phải
+	drawPriceDoors(dc, ctx, priceGroups(cfg.Prices), "BeVietnamPro-Bold.ttf", 0.023*bs, "#FFFFFF", true, leftX, yTop, int(0.011*H), 0.55)
 }

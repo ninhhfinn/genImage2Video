@@ -30,7 +30,8 @@ type ElementStyle struct {
 	// Layout
 	Align       string  `json:"align"`         // "left" | "center" | "right"
 	LineSpacing float64 `json:"line_spacing"`  // multiplier; 0 → 1.2
-	MaxWidthPct float64 `json:"max_width_pct"` // fraction of video width; 0 → no wrap
+	MaxWidthPct float64 `json:"max_width_pct"` // fraction of video width; 0 → wrap at safe default unless NoWrap
+	NoWrap      bool    `json:"-"`             // true = never auto-wrap (fit-to-width single-line callers)
 
 	// Rotation in degrees, applied after pill+text+shadow compositing.
 	// Negative = counter-clockwise (right edge lifts up). 0 = no rotation.
@@ -105,6 +106,16 @@ type RenderContext struct {
 	VideoWidth  int
 	VideoHeight int
 	AssetsDir   string // contains fonts/ and templates/
+
+	// Safe-area insets as fractions of the canvas. Render clamps each positioned
+	// element's box to stay within [inset, 1-inset] on each axis. 0 = no clamp
+	// (default — e.g. static thumbnails that may bleed intentionally to the edge).
+	// Video sets these to the TikTok safe zone (right action rail, bottom caption,
+	// top status band) so overlays never land under TikTok UI.
+	InsetLeftFrac   float64
+	InsetRightFrac  float64
+	InsetTopFrac    float64
+	InsetBottomFrac float64
 }
 
 // RenderedElement = the output of Render(): a PNG plus the (x, y) where

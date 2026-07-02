@@ -26,7 +26,7 @@ var listing = map[string]string{
 var stackKeys = []string{"address", "nickname", "prices", "amenities", "listing_id"}
 
 func main() {
-	tmplName := flag.String("template", "daiky", "template name (daiky|bold|sunset)")
+	tmplName := flag.String("template", "daiky", "template name (daiky|sunset|...)")
 	scaleArg := flag.Float64("scale", 1.0, "uniform size scale")
 	assetsDir := flag.String("assets", "assets", "assets dir (contains fonts/ + templates/)")
 	outDir := flag.String("out", "mockup-out", "output dir for the rendered PNGs")

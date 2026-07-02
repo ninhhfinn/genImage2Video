@@ -284,6 +284,7 @@ func thumbJSONErr(w http.ResponseWriter, msg string, code int) {
 // buildThumbnailImage applies defaults then dispatches to the chosen layout.
 func buildThumbnailImage(cfg ThumbnailConfig, photos []string) ([]byte, error) {
 	cfg.applyDefaults()
+	cfg.Amenities = capAmenities(cfg.Amenities, maxAmenities)
 	if len(photos) == 0 {
 		return nil, fmt.Errorf("thumbnail: cần ít nhất 1 ảnh")
 	}
@@ -324,6 +325,7 @@ func buildClassicThumbnail(cfg ThumbnailConfig, photos []string) ([]byte, error)
 	if err := drawThumbnailText(dc, cfg, ctx); err != nil {
 		return nil, err
 	}
+	drawThumbListingID(dc, cfg, ctx)
 
 	// ── 5. Encode JPEG ──
 	var buf bytes.Buffer
