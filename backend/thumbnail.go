@@ -43,6 +43,8 @@ type ThumbnailConfig struct {
 	Amenities  []string // amenities, wrapped ~3 per line, max 2 lines
 	Watermark  string   // @handle shown over the hero
 	Caption    string   // creamgrid: chữ serif trắng đè đầu ô ảnh phải-trên ("Disco Room")
+	Brand      string   // amber: wordmark nhỏ góc trên-phải (vd "lag"); rỗng = không vẽ
+	PageBadge  string   // amber: badge trang góc trên-phải (vd "1/4"); rỗng = không vẽ
 
 	// Title styling
 	TitleFont   string  // default Baloo2-Variable.ttf
@@ -126,6 +128,8 @@ type ThumbnailRequest struct {
 	Amenities []string `json:"amenities"`
 	Watermark string   `json:"watermark"`
 	Caption   string   `json:"caption"`
+	Brand     string   `json:"brand"`      // amber: wordmark góc trên-phải (vd "lag")
+	PageBadge string   `json:"page_badge"` // amber: badge số trang (vd "1/4")
 
 	Width  int `json:"width"`
 	Height int `json:"height"`
@@ -179,6 +183,7 @@ func thumbnailHandler(uploadDir, outputDir string) http.HandlerFunc {
 			Width: req.Width, Height: req.Height,
 			Title: req.Title, Address: req.Address, Prices: req.Prices,
 			Amenities: req.Amenities, Watermark: req.Watermark, Caption: req.Caption,
+			Brand: req.Brand, PageBadge: req.PageBadge,
 			TitleFont: req.TitleFont, TitleColor: req.TitleColor,
 			StrokeColor: req.StrokeColor, StrokeWidth: req.StrokeWidth,
 			BodyFont: req.BodyFont, BodyColor: req.BodyColor,
