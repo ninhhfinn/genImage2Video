@@ -48,6 +48,13 @@ type BgStyle struct {
 	Alpha   float64    `json:"alpha"`   // 0..1
 	Radius  float64    `json:"radius"`  // pixels
 	Padding [2]float64 `json:"padding"` // [vertical, horizontal] pixels
+
+	// Optional thin outline traced just inside the panel edge (e.g. the light
+	// hairline around a price card). Stroke is inset by BorderWidth/2 so it
+	// never bleeds past the panel bounds and gets clipped by the PNG margin.
+	BorderColor string  `json:"border_color,omitempty"` // hex; "" = no border
+	BorderWidth float64 `json:"border_width,omitempty"` // px; 0 = no border
+	BorderAlpha float64 `json:"border_alpha,omitempty"` // 0..1; 0 = fully opaque
 }
 
 type ShadowStyle struct {

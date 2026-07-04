@@ -145,7 +145,7 @@ type ThumbnailRequest struct {
 	// indices into the uploaded photos. Empty → natural upload order.
 	Photos []int `json:"photos"`
 
-	Template   string          `json:"thumb_template"` // "" classic | daiky | valey | peony | tiger
+	Template   string          `json:"thumb_template"` // "" classic | daiky|valey|peony|tiger | cento|amber|strip|creamgrid|filmstrip | canva1..canva6
 	PriceTable []ThumbPriceRow `json:"price_table"`    // bảng giá cho valey
 
 	// Batch render sets these so each listing's thumbnail is persisted to the
@@ -288,7 +288,13 @@ func buildThumbnailImage(cfg ThumbnailConfig, photos []string) ([]byte, error) {
 	if len(photos) == 0 {
 		return nil, fmt.Errorf("thumbnail: cần ít nhất 1 ảnh")
 	}
-	switch strings.ToLower(strings.TrimSpace(cfg.Template)) {
+	name := strings.ToLower(strings.TrimSpace(cfg.Template))
+	if chromeThumbNames[name] {
+		// canva1..6 dựng lại từ Canva "Template ảnh", render headless Chrome
+		// ở cỡ gốc design 1080×1920 (bỏ qua cfg.Width/Height).
+		return renderChromeThumbnail(cfg, photos)
+	}
+	switch name {
 	case "daiky", "valey", "peony", "tiger":
 		return buildGridThumbnail(cfg, photos)
 	case "cento", "amber", "strip", "creamgrid", "filmstrip":

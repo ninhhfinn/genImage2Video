@@ -246,52 +246,89 @@ func drawAmber(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.RenderContex
 	// scrim đáy cho tiêu đề + pill địa chỉ
 	vGradient(dc, 0, H*0.55, W, H*0.45, color.NRGBA{10, 6, 4, 0}, color.NRGBA{10, 6, 4, 150})
 
-	// panel giá góc trên-trái
+	// panel giá góc trên-trái. Khớp pixel với mẫu Lagom "Amber": nền terracotta
+	// ấm (không phải taupe xám), viền cream mảnh, hơi thụt vào trái, chữ to hơn.
 	if pr := strings.Join(trimNonEmpty(cfg.Prices), "\n"); pr != "" {
 		img, m := renderEl(&textrender.ElementStyle{
-			Text: pr, FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.0235 * scaleOr(cfg.DataScale),
+			// Mẫu gốc dùng nét MEDIUM mảnh (stroke/em ≈ 0.09) — Bold quá nặng;
+			// Regular khớp hơn cả về bề dày nét.
+			Text: pr, FontFile: "BeVietnamPro-Regular.ttf", SizePct: 0.026 * scaleOr(cfg.DataScale),
 			Color: "#FFFFFF",
-			Bg:    &textrender.BgStyle{Color: "#5A4636", Alpha: 0.62, Radius: 20, Padding: [2]float64{16, 24}},
-			Align: "left", LineSpacing: 1.6, MaxWidthPct: 0.55,
+			Bg: &textrender.BgStyle{
+				Color: "#7A3A18", Alpha: 0.82, Radius: 26, Padding: [2]float64{22, 36},
+				BorderColor: "#F3E2C8", BorderWidth: 3, BorderAlpha: 0.75,
+			},
+			Align: "left", LineSpacing: 1.6, MaxWidthPct: 0.6,
 		}, ctx)
-		drawAt(dc, img, int(0.05*W), int(0.045*H), m)
+		drawAt(dc, img, int(0.085*W), int(0.040*H), m)
 	}
 
-	// tiêu đề serif lớn canh trái-dưới. Dùng fit-to-width để TỰ CO vừa khung:
-	// tên dài 1 từ (vd "mangoapartment") không wrap được nên trước đây tràn viền.
-	titleImg, tM := renderElFitWidth(&textrender.ElementStyle{
+	// tiêu đề serif lớn canh trái-dưới. Như mẫu gốc "Amber": chữ PHÓNG TO lấp gần
+	// hết bề ngang (fill-width 2 chiều, không chỉ co), và neo theo ĐÁY nên baseline
+	// luôn nằm thấp đúng chỗ dù tên dài/ngắn.
+	titleImg, tM := renderElFillWidth(&textrender.ElementStyle{
 		Text: cfg.Title, FontFile: "PlayfairDisplay-Bold.ttf", SizePct: 0.125 * scaleOr(cfg.TitleScale),
 		Color: orStr(cfg.TitleColor, "#FFFFFF"),
 		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.5, Blur: 12, OffsetY: 4},
 		Align: "left",
-	}, ctx, 0.90)
-	titleTop := int(0.64 * H)
-	drawAt(dc, titleImg, int(0.05*W), titleTop, tM)
-	titleBottom := titleTop + contentH(titleImg, tM)
-	titleRight := int(0.05*W) + contentW(titleImg, tM)
+	}, ctx, 0.90, 0.22*scaleOr(cfg.TitleScale))
+	titleBottom := int(0.825 * H) // neo ĐÁY: baseline thấp như gốc
+	titleTop := titleBottom - contentH(titleImg, tM)
+	titleX := (cfg.Width - contentW(titleImg, tM)) / 2 // căn GIỮA: tên ngắn ("601") không dồn về mép trái
+	if titleX < int(0.05*W) {
+		titleX = int(0.05 * W) // tên dài lấp gần hết khung thì giữ lề trái tối thiểu
+	}
+	drawAt(dc, titleImg, titleX, titleTop, tM)
+	titleRight := titleX + contentW(titleImg, tM)
 
-	// pill cam "Room" dưới-phải tiêu đề (Playfair đồng bộ tiêu đề)
+	// pill cam "Room" dạng VIÊN THUỐC/bầu dục dưới-phải tiêu đề (Playfair đồng bộ)
 	if roomImg, rm := renderEl(&textrender.ElementStyle{Text: "Room", FontFile: "PlayfairDisplay-Bold.ttf",
 		SizePct: 0.05, Color: "#FFFFFF",
-		Bg: &textrender.BgStyle{Color: "#E8852A", Alpha: 1, Radius: 26, Padding: [2]float64{10, 26}}, Align: "center"}, ctx); roomImg != nil {
-		drawAt(dc, roomImg, titleRight-contentW(roomImg, rm), titleBottom-int(0.012*H), rm)
+		Bg: &textrender.BgStyle{Color: "#E8852A", Alpha: 1, Radius: 200, Padding: [2]float64{12, 30}}, Align: "center"}, ctx); roomImg != nil {
+		drawAt(dc, roomImg, titleRight-contentW(roomImg, rm), titleBottom-int(0.006*H), rm)
 	}
 	// (Bỏ badge "1/4" hardcode — số giả, đè nhãn giá góc phải.)
 
-	// pill địa chỉ xanh ở dưới-giữa (chữ HOA + ghim)
+	// pill địa chỉ XANH viên thuốc ở dưới-giữa, có VIỀN TRẮNG + ghim định vị.
+	// Tự dựng tay (nền + viền + ghim + chữ) thay vì leading-space (bị trim ⇒ ghim
+	// đè chữ). Ghim luôn nằm gọn trong padding trái, cách chữ một khoảng rõ ràng.
 	if addr := strings.TrimSpace(cfg.Address); addr != "" {
-		img, m := renderEl(&textrender.ElementStyle{
-			Text: "         " + strings.ToUpper(addr), FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.023,
-			Color: "#FFFFFF",
-			Bg:    &textrender.BgStyle{Color: "#2E7D52", Alpha: 0.85, Radius: 40, Padding: [2]float64{12, 30}},
-			Align: "center", MaxWidthPct: 0.92,
+		txtImg, tm := renderEl(&textrender.ElementStyle{
+			Text: strings.ToUpper(addr), FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.023,
+			Color: "#FFFFFF", Align: "center", MaxWidthPct: 0.84,
 		}, ctx)
-		if img != nil {
-			lh := contentH(img, m)
-			px := (cfg.Width - (img.Bounds().Dx() - 2*m)) / 2
-			py := int(0.86 * H) // nâng khỏi mép đáy để địa chỉ wrap 2 dòng không lọt khung
-			dc.DrawImage(img, px-m, py-m)
-			drawPinIcon(dc, float64(px)+float64(lh)*0.5, float64(py)+float64(lh)*0.13, float64(lh)*0.6, color.NRGBA{255, 255, 255, 255})
+		if txtImg != nil {
+			tw := float64(contentW(txtImg, tm))
+			th := float64(contentH(txtImg, tm))
+			padV, padH := 14.0, 28.0
+			pinH := th * 0.96
+			pinW := pinH * 0.66
+			gap := th * 0.34
+			pillH := th + 2*padV
+			pillW := 2*padH + pinW + gap + tw
+			if pillW > 0.95*W {
+				pillW = 0.95 * W
+			}
+			pillX := (W - pillW) / 2
+			pillY := 0.895*H - pillH/2 // neo tâm ~0.895H (trên nhãn ID ở đáy)
+			rad := pillH / 2
+			// nền xanh
+			dc.SetRGBA(float64(0x2E)/255, float64(0x7D)/255, float64(0x52)/255, 0.92)
+			dc.DrawRoundedRectangle(pillX, pillY, pillW, pillH, rad)
+			dc.Fill()
+			// viền trắng MẢNH & NHẸ bo tròn — mẫu gốc viền chỉ ~1-2px, mờ (lum~159),
+			// không phải trắng chói nên hạ độ dày + alpha cho dịu.
+			bw := 2.5
+			dc.SetRGBA(1, 1, 1, 0.5)
+			dc.SetLineWidth(bw)
+			dc.DrawRoundedRectangle(pillX+bw/2, pillY+bw/2, pillW-bw, pillH-bw, rad-bw/2)
+			dc.Stroke()
+			// ghim định vị trắng trong padding trái
+			pinCx := pillX + padH + pinW/2
+			pinTop := pillY + (pillH-pinH)/2
+			drawPinIcon(dc, pinCx, pinTop, pinH, color.NRGBA{255, 255, 255, 255})
+			// chữ địa chỉ ngay sau ghim
+			dc.DrawImage(txtImg, int(pillX+padH+pinW+gap)-tm, int(pillY+padV)-tm)
 		}
 	}
 }
@@ -516,6 +553,27 @@ func renderElFitWidth(st *textrender.ElementStyle, ctx *textrender.RenderContext
 	target := maxFrac * float64(ctx.VideoWidth)
 	if cw := float64(contentW(img, m)); cw > target {
 		st.SizePct *= target / cw
+		img, m = renderEl(st, ctx)
+	}
+	return img, m
+}
+
+// renderElFillWidth giống renderElFitWidth nhưng scale 2 CHIỀU: tên ngắn được
+// PHÓNG TO cho lấp đầy frac*W (không chỉ co tên dài) — nên tiêu đề luôn to gần
+// hết bề ngang như mẫu gốc, bất kể số ký tự. capPct chặn SizePct tối đa để tên
+// quá ngắn (1–2 ký tự) không phình cao quá khung.
+func renderElFillWidth(st *textrender.ElementStyle, ctx *textrender.RenderContext, frac, capPct float64) (image.Image, int) {
+	st.MaxWidthPct = 0
+	st.NoWrap = true
+	img, m := renderEl(st, ctx)
+	if img == nil {
+		return img, m
+	}
+	if cw := float64(contentW(img, m)); cw > 0 {
+		st.SizePct *= frac * float64(ctx.VideoWidth) / cw
+		if capPct > 0 && st.SizePct > capPct {
+			st.SizePct = capPct
+		}
 		img, m = renderEl(st, ctx)
 	}
 	return img, m
