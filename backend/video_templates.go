@@ -80,14 +80,16 @@ func renderVideoTemplateComposite(cfg Config, tmpDir string) (plans []OverlayPla
 			drawNtgRoomVideo(dc, ctx, cfg)
 		}
 
-		// Watermark + listing_id trong VÙNG AN TOÀN TikTok (canh giữa ~0.74/0.70H).
+		// Watermark + listing_id neo ở ĐÁY vùng an toàn TikTok (~0.795/0.75H) để đọc
+		// như footer, không lơ lửng giữa khung. Đáy an toàn = 0.82H (caption 18%);
+		// vị trí cũ 0.74/0.70H quá cao nên chừa 1/4 khung dưới trống.
 		if wm := strings.TrimSpace(cfg.Watermark); wm != "" && name != "editorial" {
 			img, m := renderEl(&textrender.ElementStyle{
 				Text: wm, FontFile: "BeVietnamPro-Regular.ttf", SizePct: 0.02, Color: "#FFFFFF",
 				Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.6, Blur: 4, OffsetX: 1, OffsetY: 1},
 				Align:  "center",
 			}, ctx)
-			drawCX(dc, img, W, int(0.74*float64(H)), m)
+			drawCX(dc, img, W, int(0.795*float64(H)), m)
 		}
 		if id := strings.TrimSpace(cfg.ListingID); id != "" {
 			img, m := renderEl(&textrender.ElementStyle{
@@ -95,7 +97,7 @@ func renderVideoTemplateComposite(cfg Config, tmpDir string) (plans []OverlayPla
 				Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.6, Blur: 4, OffsetX: 0.7, OffsetY: 1.4},
 				Align:  "center",
 			}, ctx)
-			drawCX(dc, img, W, int(0.70*float64(H)), m)
+			drawCX(dc, img, W, int(0.75*float64(H)), m)
 		}
 
 		if err := gg.SavePNG(path, dc.Image()); err != nil {
@@ -663,7 +665,7 @@ func drawAmorexVideo(dc *gg.Context, ctx *textrender.RenderContext, cfg Config) 
 
 	if p := strings.Join(priceGroups(cfg.Prices), "\n"); strings.TrimSpace(p) != "" {
 		panel, mp := renderEl(&textrender.ElementStyle{Text: p,
-			FontFile: "Montserrat-SemiBold.ttf", SizePct: 0.027 * bs, Color: "#812C2C",
+			FontFile: "Poppins-Light.ttf", SizePct: 0.027 * bs, Color: "#812C2C", // bảng giá light (đồng bộ đường Chrome)
 			Bg:     &textrender.BgStyle{Color: cream, Alpha: 0.92, Radius: 22, Padding: [2]float64{16, 24}},
 			Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.3, Blur: 10, OffsetY: 4},
 			Align:  "left", LineSpacing: 1.4, MaxWidthPct: 0.6}, ctx)

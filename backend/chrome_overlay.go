@@ -78,6 +78,7 @@ func fontFaceCSS() string {
 		ff("Yeseva One", "YesevaOne-Regular.ttf", "400", "normal"),
 		ff("Dancing Script", "DancingScript-Variable.ttf", "600", "normal"),
 		ff("Dancing Script", "DancingScript-Variable.ttf", "700", "normal"),
+		ff("Poppins", "Poppins-Light.ttf", "300", "normal"),
 		ff("Poppins", "Poppins-Regular.ttf", "400", "normal"),
 		ff("Poppins", "Poppins-SemiBold.ttf", "600", "normal"),
 		ff("Poppins", "Poppins-Bold.ttf", "700", "normal"),
@@ -156,12 +157,14 @@ func chromePage(cfg Config, body string) string {
 		`</body></html>`
 }
 
-// wmBlock vẽ WATERMARK (chỉ khi user nhập) ở đáy vùng an toàn TikTok. KHÔNG vẽ
-// listing_id — mã thô ("lsv3ix6oij") không có trong mockup, trước đây đè lên pill
-// địa chỉ/title gây rối. Editorial dùng watermark làm brand đỉnh nên bỏ wm ở đây.
+// wmBlock vẽ WATERMARK (chỉ khi user nhập) neo ở ĐÁY vùng an toàn TikTok
+// (top:1526px = 0.795H; đáy an toàn = 0.82H×1920 ≈ 1574px) để đọc như footer,
+// không lơ lửng giữa khung. KHÔNG vẽ listing_id — mã thô ("lsv3ix6oij") không có
+// trong mockup, trước đây đè lên pill địa chỉ/title gây rối. Editorial dùng
+// watermark làm brand đỉnh nên bỏ wm ở đây.
 func wmBlock(name string, cfg Config) string {
 	if wm := strings.TrimSpace(cfg.Watermark); wm != "" && name != "editorial" {
-		return el("top:1421px;left:0;width:1080px;text-align:center;font-family:'Montserrat',sans-serif;font-size:38px;color:#fff;font-weight:400;text-shadow:0 2px 4px rgba(0,0,0,.6)", esc(wm))
+		return el("top:1526px;left:0;width:1080px;text-align:center;font-family:'Montserrat',sans-serif;font-size:38px;color:#fff;font-weight:400;text-shadow:0 2px 4px rgba(0,0,0,.6)", esc(wm))
 	}
 	return ""
 }
@@ -312,7 +315,8 @@ func chromeTemplateBody(name string, cfg Config) string {
 			`<span style="display:inline-block;border:4.5px solid rgba(255,255,255,.8);padding:30px 36px;border-radius:30px">`+escLines(flat)+`</span>`))
 
 	case "amorex": // Trang 7 — pill kem VIỀN TRẮNG (giá + địa chỉ)
-		b.WriteString(el("top:116px;left:72px;width:560px;text-align:left;font-family:'Poppins',sans-serif;font-size:40px;color:#812c2c;font-weight:700;line-height:1.3;white-space:pre-line;",
+		// Bảng giá: Poppins Light (300) theo yêu cầu 2026-07-05 (trước đây 700 đậm).
+		b.WriteString(el("top:116px;left:72px;width:560px;text-align:left;font-family:'Poppins',sans-serif;font-size:40px;color:#812c2c;font-weight:300;line-height:1.3;white-space:pre-line;",
 			`<span style="display:inline-block;background:#f9e9af;border:6px solid #ffffff;padding:24px 34px;border-radius:24px">`+escLines(flat)+`</span>`))
 		b.WriteString(el("top:1189px;left:0px;width:1080px;text-align:center;font-family:'Paytone One',sans-serif;font-size:172px;color:#ffffff;font-weight:400;line-height:1.18;"+shHero, fitSpan(1000, nick)))
 		// max-width 1000: địa chỉ dài wrap TRONG pill, pill vẫn nổi giữa với lề
