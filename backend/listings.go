@@ -39,8 +39,12 @@ type ListingInfo struct {
 	PricesByWeek    []int64         `json:"prices_by_week"`
 	NightShortRate  float64         `json:"night_short_rate"`
 	SpecialOffer    json.RawMessage `json:"special_offer_times,omitempty"`
-	PriceLines      []string        `json:"price_lines"`      // các dòng giá đã format sẵn
-	PriceLineItems  []PriceLineItem `json:"price_line_items"` // các dòng giá có key để UI lọc
+	Combos          json.RawMessage `json:"combos,omitempty"`
+	PriceLines      []string        `json:"price_lines"`       // các dòng giá đã format sẵn
+	VideoPriceLines []string        `json:"video_price_lines"` // giá kiểu mockup video (khung giờ) cho overlay (chillgreen)
+	// PriceLinesByTemplate: bảng giá RIÊNG cho từng template video (nhãn + đơn vị y hệt mockup Canva).
+	PriceLinesByTemplate map[string][]string `json:"price_lines_by_template"`
+	PriceLineItems  []PriceLineItem `json:"price_line_items"`  // các dòng giá có key để UI lọc
 	Amenities       []string        `json:"amenities"`        // tiện nghi (nếu API trả về)
 }
 
@@ -79,6 +83,7 @@ type rawListing struct {
 	PricesPerWeek   json.RawMessage `json:"prices_per_week"`
 	NightShortRate  json.RawMessage `json:"night_short_rate"`
 	SpecialOffer    json.RawMessage `json:"special_offer_times"`
+	Combos          json.RawMessage `json:"combos"`
 	Amenities       json.RawMessage `json:"amenities"`
 	Facilities      json.RawMessage `json:"facilities"`
 	Features        json.RawMessage `json:"features"`
@@ -188,6 +193,7 @@ func toInfoSlice(raws []rawListing) []ListingInfo {
 			PricesByWeek:    pricesByWeek,
 			NightShortRate:  nightShortRate,
 			SpecialOffer:    r.SpecialOffer,
+			Combos:          r.Combos,
 		}
 		// Build price lines tự động
 		var items []PriceLineItem
@@ -243,6 +249,8 @@ func toInfoSlice(raws []rawListing) []ListingInfo {
 		for _, item := range items {
 			info.PriceLines = append(info.PriceLines, item.Text)
 		}
+		info.VideoPriceLines = mockupPriceLines(info)
+		info.PriceLinesByTemplate = priceLinesByTemplate(info)
 
 		// Amenities API là tiếng Anh → dịch sang tiếng Việt để hiển thị đúng.
 		info.Amenities = translateAmenities(firstNonEmptyStrings(r.Amenities, r.Facilities, r.Features))

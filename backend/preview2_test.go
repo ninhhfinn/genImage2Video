@@ -110,12 +110,26 @@ func TestGenVideoFaithful(t *testing.T) {
 			Prices: []string{"21h - 9h (Qua đêm): 279\n2N1Đ: 399",
 				"10h - 13h: 299\n10h - 20h: 299\n14h - 20h: 299"},
 		}},
+		{"video-7-amorex.jpg", refV2, -8, 0.5, 45, 70, Config{
+			Template: "amorex", Width: W, Height: H,
+			Nickname: "Amourex",
+			Address:  "Vũ Tông Phan, Thanh Xuân, Hà Nội",
+			Prices:   []string{"Giá giờ: 299 cá\nGiá qua đêm: 299 cá\n2N1Đ: 299 cá"},
+		}},
+		{"video-8-ntgroom.jpg", refV3, -12, 0.5, 45, 70, Config{
+			Template: "ntgroom", Width: W, Height: H,
+			Nickname: "NTG402",
+			Address:  "Vũ Tông Phan, Thanh Xuân, Hà Nội",
+			Prices:   []string{"2N1Đ: 399k\nQua đêm: 299 k\nThêm giờ: 80k\n2h đầu: 199k\nCombo giờ: 299k"},
+		}},
 	}
 
 	for _, c := range cases {
 		dc := gg.NewContext(W, H)
-		vbg(dc, c.ref, W, H, c.dim, 0, c.y0, 1, 1)
-		softVeil(dc, W, H, c.base, c.botBoost)
+		// KHÔNG phủ tối thủ công nữa: bg ảnh raw + crop y0 giống production (main.go
+		// zoompan ảnh không làm tối). Veil legibility giờ nằm trong
+		// renderVideoTemplateComposite → mockup render đúng bằng video thật.
+		vbg(dc, c.ref, W, H, 0, 0, c.y0, 1, 1)
 
 		// vẽ qua đúng đường production: composite PNG rồi đè lên nền
 		tmp := t.TempDir()

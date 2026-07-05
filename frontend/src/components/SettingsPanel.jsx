@@ -400,6 +400,12 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
             ['strip', 'Strip'],
             ['creamgrid', 'CreamGrid'],
             ['filmstrip', 'Filmstrip'],
+            ['canva1', 'Canva 1'],
+            ['canva2', 'Canva 2'],
+            ['canva3', 'Canva 3'],
+            ['canva4', 'Canva 4'],
+            ['canva5', 'Canva 5'],
+            ['canva6', 'Canva 6'],
             ['random', '🎲 Random'],
           ].map(([v,l])=>(
             <button
@@ -415,13 +421,19 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
           {(settings.thumbTemplate||'')===''
             ? 'Classic: 1 ảnh lớn + 3 polaroid bên phải. Để trống dữ liệu = tự lấy từ listing.'
             : (settings.thumbTemplate==='random'
-                ? '🎲 Random: mỗi listing tự bốc 1 trong 9 template khác nhau.'
+                ? '🎲 Random: mỗi listing tự bốc 1 trong 15 template khác nhau.'
                 : ({
                     cento: 'Lưới 2×2 + panel thông tin nâu giữa + nhãn combo 4 góc.',
                     amber: '1 ảnh hero, khối giá góc trên, tiêu đề serif lớn + pill địa chỉ.',
                     strip: 'Tiêu đề trên cùng + dải 3 ảnh ngang + giá phía dưới.',
                     creamgrid: 'Nền kem, chữ serif đỏ, lưới ảnh lệch cột + caption "Disco Room".',
                     filmstrip: '3 dải ảnh xếp dọc, dải giữa phủ chữ (tiêu đề + tagline + giá).',
+                    canva1: 'Canva T1 (9:16): 3 dải ảnh dọc, tên + tagline + giá Yeseva trắng, địa chỉ uốn cong.',
+                    canva2: 'Canva T2 (9:16): nền lớn + dải 3 ảnh giữa, tên/địa chỉ/giá Yeseva, tiện ích dưới.',
+                    canva3: 'Canva T3 (9:16): lưới 2×2, "homestay" viết tay + tên kèm sao ✦, chữ kem Comic.',
+                    canva4: 'Canva T4 (9:16): mã phòng SIÊU TO giữa, pill tiện ích + panel giá mờ.',
+                    canva5: 'Canva T5 (9:16): "Homestay" chữ brush kem + tên Francois One + giá Poppins.',
+                    canva6: 'Canva T6 (9:16): 2 ảnh dọc, tên Anton kem + 2 panel trắng mờ (tiện ích, giá).',
                   }[settings.thumbTemplate]
                   || 'Lưới 2×2 + khối chữ giữa. Valey có bảng giá Trong tuần/Cuối tuần (tự lấy từ prices_by_week).'))}
         </div>
@@ -448,10 +460,12 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
           onChange={e=>set('thumbTitle')(e.target.value)}
           style={{marginBottom:8}}
         />
-        {(settings.thumbTemplate==='creamgrid' || settings.thumbTemplate==='random') && (
+        {['creamgrid','random','canva1'].includes(settings.thumbTemplate||'') && (
           <input
             className="inp body-font"
-            placeholder="Chữ trên ảnh CreamGrid (vd Disco Room) — trống = bỏ"
+            placeholder={settings.thumbTemplate==='canva1'
+              ? 'Tagline Canva 1 — trống = "Trạm sạc cảm xúc"'
+              : 'Chữ trên ảnh CreamGrid (vd Disco Room) — trống = bỏ'}
             value={settings.thumbCaption || ''}
             onChange={e=>set('thumbCaption')(e.target.value)}
             style={{marginBottom:8}}

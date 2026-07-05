@@ -45,7 +45,7 @@ const DEFAULT_SETTINGS = {
   postFacebook: true,     // gửi kèm cờ đăng Facebook Page
 
   // ── Thumbnail (ảnh collage tĩnh) — để trống, tự chỉnh sau ──
-  thumbTemplate: '',      // '' classic | daiky|valey|peony|tiger | cento|amber|strip|creamgrid|filmstrip
+  thumbTemplate: '',      // '' classic | daiky|valey|peony|tiger | cento|amber|strip|creamgrid|filmstrip | canva1..canva6
   thumbTitle: '',         // chữ tiêu đề lớn (vd "Sunset"); trống → lấy nickname
   thumbCaption: '',       // chữ trên ô ảnh phải-trên của CreamGrid (vd "Disco Room")
   thumbPrice: '',         // dòng giá gọn (vd "2h 249k- 4h 367k- Qua đêm 449k"); trống → tự ghép từ listing
@@ -154,11 +154,18 @@ export default function App() {
       const selectedPriceTypes = Array.isArray(overlayPriceTypes)
         ? new Set(overlayPriceTypes)
         : null
-      const priceLines = listing.price_line_items?.length
-        ? listing.price_line_items
-            .filter(item => !selectedPriceTypes || selectedPriceTypes.has(item.key))
-            .map(item => item.text)
-        : listing.price_lines || []
+      // Mỗi template video có bảng giá RIÊNG (nhãn + đơn vị y hệt mockup Canva): amorex/
+      // editorial = "… cá", ntgroom = "…k", chillgreen/marquee = khung giờ, goldserif/
+      // staycation/creampill = số đầy đủ. Backend dựng sẵn price_lines_by_template[template].
+      // Thiếu (template không phải video) → rơi về price_line_items/price_lines như cũ.
+      const perTemplate = listing.price_lines_by_template?.[template]
+      const priceLines = perTemplate?.length
+        ? perTemplate
+        : listing.price_line_items?.length
+          ? listing.price_line_items
+              .filter(item => !selectedPriceTypes || selectedPriceTypes.has(item.key))
+              .map(item => item.text)
+          : listing.price_lines || []
       cfg.address       = listing.address    || ''
       cfg.nickname      = listing.nickname   || listing.name || ''
       cfg.listing_id    = listing.id         || ''
@@ -199,14 +206,22 @@ export default function App() {
   // ── Build cfg gửi API render-thumbnail ──
   const buildThumbnailCfg = useCallback((listing, { batch = false } = {}) => {
     const s = settings
-    // Random: mỗi listing chọn ngẫu nhiên 1 template lưới/collage.
+    // Random: mỗi listing chọn ngẫu nhiên 1 template lưới/collage/canva.
     const GRID_TEMPLATES = ['daiky', 'valey', 'peony', 'tiger',
-      'cento', 'amber', 'strip', 'creamgrid', 'filmstrip']
+      'cento', 'amber', 'strip', 'creamgrid', 'filmstrip',
+      'canva1', 'canva2', 'canva3', 'canva4', 'canva5', 'canva6']
     let resolvedTemplate = s.thumbTemplate || ''
     if (resolvedTemplate === 'random') {
       resolvedTemplate = GRID_TEMPLATES[Math.floor(Math.random() * GRID_TEMPLATES.length)]
     }
-    const firstWord = (str) => (str || '').trim().split(/\s+/)[0] || ''
+    // Fallback khi listing không có nickname: bỏ prefix khuyến mãi "[OFF 20%]"
+    // rồi lấy từ đầu (+ từ thứ 2 nếu là số phòng): "[OFF 20%] STUDIO 504 - Máy
+    // chiếu" → "STUDIO 504" (trước đây ra "[OFF" vô nghĩa trên thumbnail).
+    const firstWord = (str) => {
+      const ws = (str || '').replace(/^\s*(\[[^\]]*\]\s*)+/, '').trim().split(/\s+/).filter(Boolean)
+      if (!ws.length) return ''
+      return ws[1] && /\d/.test(ws[1]) ? ws[0] + ' ' + ws[1] : ws[0]
+    }
     // Batch: ưu tiên nickname của từng listing (bỏ ô tiêu đề tay — nếu không cả
     // mẻ thumbnail sẽ dính chung một tên).
     const title = batch

@@ -25,6 +25,13 @@ mockup-assets/
 /*.webp
 /*.mp4
 
+# ── Output render/test sinh ra (không commit) ──
+real-render-out/
+realapi-out/
+realapi-video-out/
+shot-out/
+scratch/
+
 # ── Rác hệ điều hành ──
 .DS_Store
 Thumbs.db

@@ -382,7 +382,7 @@ func drawThumbListingID(dc *gg.Context, cfg ThumbnailConfig, ctx *textrender.Ren
 	}
 	W, H := cfg.Width, cfg.Height
 	img, m := renderEl(&textrender.ElementStyle{
-		Text: "ID: " + id, FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.018, Color: "#FFFFFF",
+		Text: "ID: " + id, FontFile: "BeVietnamPro-Bold.ttf", SizePct: 0.021, Color: "#FFFFFF",
 		Bg:     &textrender.BgStyle{Color: "#000000", Alpha: 0.5, Radius: 14, Padding: [2]float64{7, 18}},
 		Shadow: &textrender.ShadowStyle{Color: "#000000", Alpha: 0.4, Blur: 5, OffsetY: 1},
 		Align:  "center", MaxWidthPct: 0.9,
