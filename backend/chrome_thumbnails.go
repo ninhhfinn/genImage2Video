@@ -181,16 +181,16 @@ func chromeThumbBody(name string, cfg ThumbnailConfig, photos []string) string {
 			`<span style="text-shadow:none">📍</span>`+fitSpan(960, addr)))
 		if amen != "" {
 			b.WriteString(el("top:722px;left:113px;width:838px;text-align:center;font-family:'Poppins',sans-serif;font-weight:400;font-size:41px;color:#ffffff;line-height:56px;",
-				`<span style="display:inline-block;background:rgba(15,17,22,.28);border:2px solid rgba(255,255,255,.3);border-radius:28px;padding:15px 30px;max-width:838px">`+amen+`</span>`))
+				`<span style="display:inline-block;background:rgba(15,17,22,.28);border:5px solid rgba(255,255,255,.7);border-radius:28px;padding:15px 30px;max-width:838px">`+amen+`</span>`))
 		}
 		b.WriteString(el("bottom:140px;left:65px;font-family:'Poppins',sans-serif;font-weight:400;font-size:41px;color:#ffffff;line-height:55px;",
-			`<span style="display:inline-block;background:rgba(15,17,22,.32);border:2px solid rgba(255,255,255,.3);border-radius:28px;padding:26px 60px 26px 35px;text-align:left;white-space:pre-line">`+prices+`</span>`))
+			`<span style="display:inline-block;background:rgba(15,17,22,.32);border:5px solid rgba(255,255,255,.7);border-radius:28px;padding:26px 60px 26px 35px;text-align:left;white-space:pre-line">`+prices+`</span>`))
 
 	case "canva5": // Trang 5 — nền full, "Homestay" brush kem + Francois One
 		b.WriteString(thumbImg(thumbPhoto(photos, 0), "top:0;left:0;width:1080px;height:1920px"))
 		b.WriteString(thumbVeil("rgba(0,0,0,.08)"))
 		b.WriteString(el("top:278px;left:-20px;width:1080px;text-align:center;font-family:'Kaushan Script',cursive;font-size:247px;letter-spacing:-9.5px;color:#ffffe9;"+thumbShCream, "Homestay"))
-		b.WriteString(el("top:613px;left:0;width:1080px;text-align:center;font-family:'Francois One',sans-serif;font-size:80px;color:#ffffe9;"+thumbShCream, fitSpan(940, title)))
+		b.WriteString(el("top:613px;left:0;width:1080px;text-align:center;font-family:'Francois One','Baloo 2',sans-serif;font-size:80px;color:#ffffe9;"+thumbShCream, fitSpan(940, title)))
 		b.WriteString(el("top:717px;left:0;width:1080px;text-align:center;font-family:'Poppins',sans-serif;font-weight:500;font-size:41px;color:#ffffe9;"+thumbShCream, fitSpan(980, addr)))
 		b.WriteString(el("top:791px;left:-8px;width:1080px;text-align:center;font-family:'Poppins',sans-serif;font-weight:500;font-size:40px;color:#ffffe9;line-height:1.39;white-space:pre-line;"+thumbShCream, prices))
 
