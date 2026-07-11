@@ -706,11 +706,14 @@ func dayladauListingsHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 
 		var body struct {
-			Checkin  string `json:"checkin"`
-			Checkout string `json:"checkout"`
-			Guests   int    `json:"guests"`
-			Limit    int    `json:"limit"`
-			Offset   int    `json:"offset"`
+			Checkin      string `json:"checkin"`
+			Checkout     string `json:"checkout"`
+			Guests       int    `json:"guests"`
+			Limit        int    `json:"limit"`
+			Offset       int    `json:"offset"`
+			Address      string `json:"address"`
+			ProvinceCode string `json:"province_code"`
+			WardCode     string `json:"ward_code"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			log.Printf("[dayladau] invalid request body: %v", err)
@@ -718,7 +721,7 @@ func dayladauListingsHandler() http.HandlerFunc {
 			return
 		}
 
-		apiURL := buildDayladauURL(body.Checkin, body.Checkout, body.Guests, body.Limit, body.Offset)
+		apiURL := buildDayladauURL(body.Checkin, body.Checkout, body.Guests, body.Limit, body.Offset, body.Address, body.ProvinceCode, body.WardCode)
 		log.Printf("[dayladau] fetch url=%s", apiURL)
 
 		rawJSON, err := fetchRawJSON(apiURL, nil)
@@ -746,7 +749,15 @@ func dayladauListingsHandler() http.HandlerFunc {
 // buildDayladauURL constructs the dayladau v1/listings query. It drops the
 // shorten flag so each listing returns its full photo gallery (needed for a
 // video), and uses a fresh _updated timestamp as a cache-buster.
-func buildDayladauURL(checkin, checkout string, guests, limit, offset int) string {
+// address is sent as the API's fuzzy "keyword" filter — it matches quận
+// ("Cầu Giấy"), thành phố ("Đà Nẵng") and landmarks ("Hồ Tây", "phố cổ");
+// the exact-match "district" param is too strict for free-text input.
+//
+// provinceCode / wardCode come from the vn-geo picker (2-cấp tỉnh/phường-xã).
+// We forward them as province_code / ward_code AND still send the picked name
+// as keyword, so filtering keeps working even if the Dayladau API ignores the
+// codes (param names are a best guess pending confirmation).
+func buildDayladauURL(checkin, checkout string, guests, limit, offset int, address, provinceCode, wardCode string) string {
 	if guests <= 0 {
 		guests = 2
 	}
@@ -773,6 +784,15 @@ func buildDayladauURL(checkin, checkout string, guests, limit, offset int) strin
 	q.Set("start_time_v2", dayladauTime(checkin, "1400"))
 	q.Set("end_time_v2", dayladauTime(checkout, "1100"))
 	q.Set("is_suggest_promotion", "true")
+	if a := strings.TrimSpace(address); a != "" {
+		q.Set("keyword", a)
+	}
+	if pc := strings.TrimSpace(provinceCode); pc != "" {
+		q.Set("province_code", pc)
+	}
+	if wc := strings.TrimSpace(wardCode); wc != "" {
+		q.Set("ward_code", wc)
+	}
 	return "https://api.dayladau.com/v1/listings?" + q.Encode()
 }
 

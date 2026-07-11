@@ -150,7 +150,7 @@
       "color": "#FFFFFF",
       "position": {
         "x": "center",
-        "y": "0.70"
+        "y": "0.75"
       },
       "align": "center"
     },
@@ -167,7 +167,7 @@
       },
       "position": {
         "x": "center",
-        "y": "0.74"
+        "y": "0.795"
       },
       "align": "center"
     }
