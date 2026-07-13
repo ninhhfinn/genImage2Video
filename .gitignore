@@ -35,3 +35,6 @@ scratch/
 # ── Rác hệ điều hành ──
 .DS_Store
 Thumbs.db
+
+# ── Khoá API local (không commit) ──
+.secrets.env

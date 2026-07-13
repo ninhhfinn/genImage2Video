@@ -1,5 +1,6 @@
 import TemplatePicker from './TemplatePicker'
 import FontUpload from './FontUpload'
+import MusicPicker from './MusicPicker'
 
 export default function SettingsPanel({ settings, onChange, uploadedCount, apiAmenities = [] }) {
   const {
@@ -27,6 +28,11 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
   const webhookUrl = settings.webhookUrl || ''
   const postTiktok = settings.postTiktok !== false
   const postFacebook = settings.postFacebook !== false
+  // Thuyết minh AI
+  const narrationPersona = settings.narrationPersona || 'haihuoc'
+  const ttsProvider = settings.ttsProvider || 'elevenlabs'
+  const voiceId = settings.voiceId || ''
+  const maxSegments = settings.maxSegments ?? 10
   const perImg = Number(duration) || 3
   const titleSecs = Math.max(0.5, Number(titleDuration) || 3)
   const safePhotoLimit = Number(photoLimit) || 12
@@ -80,7 +86,7 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
       <div className="field">
         <label className="flabel">Hiệu ứng</label>
         <div className="seg">
-          {[['kenburns','Ken Burns'],['slideshow','Slideshow'],['timelapse','Timelapse']].map(([v,l])=>(
+          {[['kenburns','Ken Burns'],['slideshow','Slideshow'],['timelapse','Timelapse'],['narrated','🎙️ Thuyết minh AI']].map(([v,l])=>(
             <button key={v} className={`seg-btn${mode===v?' on':''}`} onClick={()=>set('mode')(v)}>{l}</button>
           ))}
         </div>
@@ -112,6 +118,74 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
             {currentEffect==='random'
               ? 'Mỗi cảnh (mỗi ảnh) được gán riêng zoom-in / zoom-out / pan trái→phải / pan phải→trái; không trộn nhiều kiểu trên cùng một ảnh.'
               : 'Chọn cố định: mọi ảnh dùng cùng họ hiệu ứng (có thể khác biến thể nhẹ giữa các ảnh). Pan = lia ngang.'}
+          </div>
+        </div>
+      )}
+
+      {/* Thuyết minh AI — chỉ khi mode==='narrated' */}
+      {mode==='narrated' && (
+        <div className="field">
+          <label className="flabel">🎙️ Giọng đọc AI</label>
+
+          <label className="flabel" style={{marginBottom:6,marginTop:4}}>Phong cách</label>
+          <div className="seg" style={{marginBottom:8}}>
+            {[['haihuoc','😜 Hài hước'],['lichsu','🤵 Lịch sự']].map(([v,l])=>(
+              <button
+                key={v}
+                type="button"
+                className={`seg-btn${narrationPersona===v?' on':''}`}
+                onClick={()=>set('narrationPersona')(v)}
+              >{l}</button>
+            ))}
+          </div>
+
+          <label className="flabel" style={{marginBottom:6}}>Nhà cung cấp giọng (TTS)</label>
+          <div className="seg" style={{marginBottom:8}}>
+            {[['google','🆓 Google (free)'],['elevenlabs','ElevenLabs'],['fpt','FPT.AI']].map(([v,l])=>(
+              <button
+                key={v}
+                type="button"
+                className={`seg-btn${ttsProvider===v?' on':''}`}
+                onClick={()=>set('ttsProvider')(v)}
+              >{l}</button>
+            ))}
+          </div>
+
+          {ttsProvider!=='google' && (
+            <input
+              className="inp body-font"
+              placeholder={ttsProvider==='fpt'
+                ? 'banmai / lannhi / leminh… (bỏ trống = giọng mặc định)'
+                : 'Voice ID (bỏ trống = giọng mặc định)'}
+              value={voiceId}
+              onChange={e=>set('voiceId')(e.target.value)}
+              style={{marginBottom:8}}
+            />
+          )}
+          {ttsProvider==='google' && (
+            <div className="hint" style={{marginBottom:8,opacity:0.7}}>
+              🆓 Google đọc tiếng Việt miễn phí, không cần key (giọng máy, hợp thử nhanh).
+            </div>
+          )}
+
+          <label className="flabel">
+            Số cảnh tối đa &nbsp;
+            <span style={{color:'var(--gold)',fontFamily:'var(--mono)'}}>{maxSegments}</span>
+          </label>
+          <div className="slider-row">
+            <input type="range" min="3" max="15" step="1" value={maxSegments} onChange={e=>set('maxSegments')(+e.target.value)}/>
+            <span className="slider-val">{maxSegments}</span>
+          </div>
+
+          <div style={{marginTop:10}}>
+            <MusicPicker
+              value={settings.music || ''}
+              onChange={(v)=>set('music')(v)}
+            />
+          </div>
+
+          <div style={{fontSize:10,color:'var(--muted)',marginTop:6,fontStyle:'italic'}}>
+            ⚙️ Cần Claude Code đăng nhập hoặc ANTHROPIC_API_KEY + key TTS trên máy chạy backend.
           </div>
         </div>
       )}

@@ -73,6 +73,12 @@ type Config struct {
 	AutoPost   bool     // bật gửi video tới webhook
 	WebhookURL string   // URL webhook nhận video + metadata
 	Platforms  []string // ["tiktok","facebook"]
+
+	// Mode "narrated": lời kể AI (Claude Vision) + giọng đọc TTS + phụ đề
+	NarrationPersona string // "haihuoc" (mặc định) | "lichsu"
+	TTSProvider      string // "elevenlabs" (mặc định) | "fpt"
+	VoiceID          string // voice id/name cho provider; "" → mặc định env
+	MaxSegments      int    // số cảnh tối đa (3–15); 0 → 10
 }
 
 var supportedExts = map[string]bool{
@@ -425,7 +431,7 @@ func parseFlags() Config {
 	cfg := Config{}
 	flag.StringVar(&cfg.Input, "input", "", "Thư mục ảnh (bắt buộc)")
 	flag.StringVar(&cfg.Output, "output", "output.mp4", "File video ra")
-	flag.StringVar(&cfg.Mode, "mode", "kenburns", "slideshow | kenburns | timelapse")
+	flag.StringVar(&cfg.Mode, "mode", "kenburns", "slideshow | kenburns | timelapse | narrated")
 	flag.Float64Var(&cfg.Total, "total", 40, "Tổng thời gian video (giây)")
 	flag.Float64Var(&cfg.Duration, "duration", 0, "Giây mỗi ảnh (tự tính nếu dùng --total)")
 	flag.IntVar(&cfg.FPS, "fps", 30, "FPS")
@@ -441,6 +447,10 @@ func parseFlags() Config {
 	flag.BoolVar(&cfg.Tiktok, "tiktok", true, "9:16 cho TikTok/Reels")
 	flag.BoolVar(&cfg.Verbose, "verbose", false, "In lệnh FFmpeg")
 	flag.BoolVar(&cfg.DryRun, "dry-run", false, "Chỉ in lệnh, không chạy")
+	flag.StringVar(&cfg.NarrationPersona, "narration-persona", "haihuoc", "narrated: haihuoc | lichsu")
+	flag.StringVar(&cfg.TTSProvider, "tts-provider", "elevenlabs", "narrated: elevenlabs | fpt")
+	flag.StringVar(&cfg.VoiceID, "voice-id", "", "narrated: voice id/name (bỏ trống = mặc định)")
+	flag.IntVar(&cfg.MaxSegments, "max-segments", 10, "narrated: số cảnh tối đa (3–15)")
 	flag.Usage = printUsage
 	flag.Parse()
 	if cfg.Input == "" {
@@ -506,6 +516,8 @@ func run(cfg Config) error {
 		args, err = buildKenBurns(cfg, images)
 	case "timelapse":
 		args, err = buildTimelapse(cfg, images)
+	case "narrated":
+		args, err = buildNarrated(cfg, images)
 	default:
 		return fmt.Errorf("mode không hợp lệ: %s", cfg.Mode)
 	}

@@ -76,6 +76,13 @@ type RenderRequest struct {
 	AutoPost   bool     `json:"auto_post"`
 	WebhookURL string   `json:"webhook_url"`
 	Platforms  []string `json:"platforms"` // ["tiktok","facebook"]
+
+	// Mode "narrated": lời kể AI + giọng đọc TTS + phụ đề + nhạc nền
+	NarrationPersona string `json:"narration_persona"`
+	TTSProvider      string `json:"tts_provider"`
+	VoiceID          string `json:"voice_id"`
+	MaxSegments      int    `json:"max_segments"`
+	Music            string `json:"music"` // tên file nhạc trong music dir; "" = không nhạc
 }
 
 // ─── Start server ─────────────────────────────────────────────────────────
@@ -112,6 +119,11 @@ func startWebServer(port int) error {
 	mux.HandleFunc("/api/fonts", listFontsHandler())
 	mux.HandleFunc("/api/font-preview", fontPreviewHandler())
 	mux.HandleFunc("/api/delete-font", deleteFontHandler())
+
+	// Nhạc nền cho mode narrated (upload / list / delete).
+	mux.HandleFunc("/api/upload-music", uploadMusicHandler())
+	mux.HandleFunc("/api/music", listMusicHandler())
+	mux.HandleFunc("/api/delete-music", deleteMusicHandler())
 
 	// Health check
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -317,12 +329,45 @@ func renderHandler(uploadDir, outputDir string) http.HandlerFunc {
 			AutoPost:      req.AutoPost,
 			WebhookURL:    req.WebhookURL,
 			Platforms:     req.Platforms,
+
+			NarrationPersona: req.NarrationPersona,
+			TTSProvider:      req.TTSProvider,
+			VoiceID:          req.VoiceID,
+			MaxSegments:      req.MaxSegments,
 		}
 		if cfg.Mode == "" {
 			cfg.Mode = "kenburns"
 		}
+		// Nhạc nền: tên file → đường dẫn thật trong music dir (dùng cho ducking).
+		if p := resolveMusicPath(req.Music); p != "" {
+			cfg.Audio = p
+		}
+		// Preflight cho mode narrated: báo lỗi rõ ràng TRƯỚC khi tốn API.
+		if cfg.Mode == "narrated" {
+			if perr := narratePreflight(cfg); perr != nil {
+				state.mu.Lock()
+				state.err = perr.Error()
+				state.running = false
+				state.done = true
+				state.progress = ""
+				state.mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(400)
+				json.NewEncoder(w).Encode(map[string]string{"error": perr.Error()})
+				return
+			}
+		}
 
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					state.mu.Lock()
+					state.err = fmt.Sprintf("Lỗi không mong đợi khi render: %v", r)
+					state.running = false
+					state.done = true
+					state.mu.Unlock()
+				}
+			}()
 			images, err := collectImages(cfg.Input)
 			if err != nil {
 				state.mu.Lock()
@@ -345,6 +390,8 @@ func renderHandler(uploadDir, outputDir string) http.HandlerFunc {
 				args, err = buildSlideshow(cfg, images)
 			case "timelapse":
 				args, err = buildTimelapse(cfg, images)
+			case "narrated":
+				args, err = buildNarrated(cfg, images)
 			default:
 				args, err = buildKenBurns(cfg, images)
 			}

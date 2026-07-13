@@ -38,6 +38,13 @@ const DEFAULT_SETTINGS = {
   batchMode: 'both',      // mẻ nhiều listing xuất gì: 'video' | 'thumbnail' | 'both'
   customFont: '',         // font tự tải lên cho tiêu đề (video + thumbnail); '' = theo template
 
+  // ── Thuyết minh AI (mode==='narrated') — giọng đọc AI + nhạc nền ──
+  narrationPersona: 'haihuoc',   // 'haihuoc' hài hước | 'lichsu' lịch sự
+  ttsProvider: 'elevenlabs',     // 'elevenlabs' | 'fpt'
+  voiceId: '',                   // voice id/name theo provider; '' = giọng mặc định
+  maxSegments: 10,               // số cảnh tối đa 3..15
+  music: '',                     // tên file nhạc nền từ GET /api/music; '' = không nhạc
+
   // ── Tự đăng social qua webhook (Make.com / n8n) ──
   autoPost: false,        // render xong tự gửi video tới webhook
   webhookUrl: '',         // link webhook nhận video + metadata
@@ -188,6 +195,14 @@ export default function App() {
         .map(s => s.trim())
         .filter(Boolean)
       cfg.amenities = manualAmenities.length ? manualAmenities : curateAmenities(listing.amenities || [])
+    }
+    // Thuyết minh AI: gửi tham số giọng đọc + nhạc nền cho backend TTS pipeline
+    if (settings.mode === 'narrated') {
+      cfg.narration_persona = settings.narrationPersona
+      cfg.tts_provider      = settings.ttsProvider
+      cfg.voice_id          = settings.voiceId
+      cfg.max_segments      = settings.maxSegments
+      cfg.music             = settings.music
     }
     // Tự đăng social: render xong backend gửi video tới webhook
     if (settings.autoPost && (settings.webhookUrl || '').trim()) {

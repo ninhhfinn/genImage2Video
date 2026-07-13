@@ -40,8 +40,11 @@ export function useRender(onDone, onError) {
         } catch {}
       }, 600)
     } catch (e) {
-      setRendering(false); setError(e.message)
-      onError?.(e.message)
+      // Ưu tiên thông báo lỗi rõ ràng từ backend (vd preflight narrated trả 400
+      // kèm {"error":"Chưa có ELEVENLABS_API_KEY..."}), không dùng message chung chung.
+      const msg = e.response?.data?.error || e.message
+      setRendering(false); setError(msg); setStatus('❌ Lỗi'); setPct(0)
+      onError?.(msg)
     }
   }
 

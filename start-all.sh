@@ -17,6 +17,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+# ── Nạp khoá API local (nếu có) ────────────────────────────
+# .secrets.env chứa ELEVENLABS_API_KEY, FPT_TTS_API_KEY... (không commit lên git)
+if [ -f "$ROOT/.secrets.env" ]; then
+  set -a; . "$ROOT/.secrets.env"; set +a
+  echo "🔑  Đã nạp khoá API từ .secrets.env"
+fi
+
 BACKEND_PID=""
 STARTED_BACKEND=0
 cleanup() {

@@ -54,6 +54,19 @@ export const deleteFont = (font) =>
 export const fontPreviewUrl = (font, text) =>
   `/api/font-preview?font=${encodeURIComponent(font)}&text=${encodeURIComponent(text || '')}&_=${Date.now()}`
 
+// ── Nhạc nền (bring-your-own) — dùng cho chế độ Thuyết minh AI ──
+export const uploadMusic = (file) => {
+  const fd = new FormData()
+  fd.append('music', file)
+  return api.post('/upload-music', fd, { timeout: 60000 })
+}
+
+export const getMusic = () =>
+  api.get('/music').then(r => r.data || [])
+
+export const deleteMusic = (music) =>
+  api.post('/delete-music', { music })
+
 export const downloadVideo = () => {
   window.location.href = '/api/download'
 }
