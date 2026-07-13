@@ -2,6 +2,38 @@ import TemplatePicker from './TemplatePicker'
 import FontUpload from './FontUpload'
 import MusicPicker from './MusicPicker'
 
+// Section có tiêu đề — chia cột Cài đặt thành các nhóm rõ ràng.
+// Không dùng emoji (mockup duyệt: uppercase teal sạch, letter-spaced).
+function Section({ title, children }) {
+  return (
+    <div className="sect">
+      <div className="sect-label">{title}</div>
+      {children}
+    </div>
+  )
+}
+
+// Ảnh nhận diện template thumbnail (render mẫu theo thiết kế Canva gốc).
+const THUMB_TPLS = [
+  ['',          'Classic',   '/templates/thumb-classic.jpg'],
+  ['daiky',     'Daiky',     '/templates/thumb-daiky.jpg'],
+  ['valey',     'Valey',     '/templates/thumb-valey.jpg'],
+  ['peony',     'Peony',     '/templates/thumb-peony.jpg'],
+  ['tiger',     'Tiger',     '/templates/thumb-tiger.jpg'],
+  ['cento',     'Cento',     '/templates/thumb-cento.jpg'],
+  ['amber',     'Amber',     '/templates/thumb-amber.jpg'],
+  ['strip',     'Strip',     '/templates/thumb-strip.jpg'],
+  ['creamgrid', 'CreamGrid', '/templates/thumb-creamgrid.jpg'],
+  ['filmstrip', 'Filmstrip', '/templates/thumb-filmstrip.jpg'],
+  ['canva1',    'Canva 1',   '/templates/thumb-canva1.jpg'],
+  ['canva2',    'Canva 2',   '/templates/thumb-canva2.jpg'],
+  ['canva3',    'Canva 3',   '/templates/thumb-canva3.jpg'],
+  ['canva4',    'Canva 4',   '/templates/thumb-canva4.jpg'],
+  ['canva5',    'Canva 5',   '/templates/thumb-canva5.jpg'],
+  ['canva6',    'Canva 6',   '/templates/thumb-canva6.jpg'],
+  ['random',    'Random',    null],
+]
+
 export default function SettingsPanel({ settings, onChange, uploadedCount, apiAmenities = [] }) {
   const {
     mode, duration, photoLimit, zoom, tiktok, title, titleDuration, watermark, effectType, useOverlay,
@@ -38,11 +70,12 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
   const safePhotoLimit = Number(photoLimit) || 12
   const totalTime = uploadedCount > 0 ? (perImg * uploadedCount).toFixed(1) : '—'
   const set = (key) => (val) => onChange({ ...settings, [key]: val })
+
   const effectOptions = [
-    ['zoom-in',  '🔍 Zoom In'],
-    ['zoom-out', '🔎 Zoom Out'],
-    ['move-left-right', 'Move Left → Right'],
-    ['move-right-left', 'Move Right → Left'],
+    ['zoom-in',  'Zoom In'],
+    ['zoom-out', 'Zoom Out'],
+    ['move-left-right', 'Trái → Phải'],
+    ['move-right-left', 'Phải → Trái'],
   ]
   const normalizeEffect = (value) => {
     if (value === 'pan-right') return 'move-left-right'
@@ -57,14 +90,14 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
     onChange({ ...settings, effectType: v })
   }
   const priceTypeOptions = [
-    ['two_day_one_night', 'Giá 2 ngày 1 đêm', 'prices_by_week[2]'],
+    ['two_day_one_night', '2 ngày 1 đêm', 'prices_by_week[2]'],
     ['overnight', 'Qua đêm', 'night_short_rate × prices_by_week thứ 2'],
     ['hourly', 'Giá giờ', 'price_first_hours'],
-    ['extra_hour', 'Giá thêm giờ', 'price_per_hour'],
+    ['extra_hour', 'Thêm giờ', 'price_per_hour'],
     ['hour_combo', 'Combo giờ', 'special_offer_times thứ 2'],
   ]
   const fontOptions = [
-    ['playfair', 'Playfair Display', 'Serif sang, hợp badge'],
+    ['playfair', 'Playfair', 'Serif sang, hợp badge'],
     ['lilita', 'Lilita One', 'Chữ dày, hợp bubble'],
     ['yeseva', 'Yeseva One', 'Serif cong, hợp Daiky'],
   ]
@@ -74,178 +107,172 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
     onChange({ ...settings, overlayPriceTypes: [...next] })
   }
 
+  const thumbTemplate = settings.thumbTemplate || ''
+  const thumbDesc =
+    thumbTemplate === ''
+      ? 'Classic: 1 ảnh lớn + 3 polaroid bên phải. Để trống dữ liệu = tự lấy từ listing.'
+      : thumbTemplate === 'random'
+        ? '🎲 Random: mỗi listing tự bốc 1 trong 9 template khác nhau.'
+        : ({
+            cento: 'Lưới 2×2 + panel thông tin nâu giữa + nhãn combo 4 góc.',
+            amber: '1 ảnh hero, khối giá góc trên, tiêu đề serif lớn + pill địa chỉ.',
+            strip: 'Tiêu đề trên cùng + dải 3 ảnh ngang + giá phía dưới.',
+            creamgrid: 'Nền kem, chữ serif đỏ, lưới ảnh lệch cột + caption "Disco Room".',
+            filmstrip: '3 dải ảnh xếp dọc, dải giữa phủ chữ (tiêu đề + tagline + giá).',
+          }[thumbTemplate]
+          || 'Lưới 2×2 + khối chữ giữa. Valey có bảng giá Trong tuần/Cuối tuần (tự lấy từ prices_by_week).')
+
   return (
     <div>
-      {/* Template picker — đầu danh sách */}
-      <TemplatePicker
-        value={settings.template || 'daiky'}
-        onChange={(v) => set('template')(v)}
-      />
+      {/* ══ 1. VIDEO ══ */}
+      <Section title="Video">
+        <TemplatePicker
+          value={settings.template || 'daiky'}
+          onChange={(v) => set('template')(v)}
+        />
 
-      {/* Mode */}
-      <div className="field">
-        <label className="flabel">Hiệu ứng</label>
-        <div className="seg">
-          {[['kenburns','Ken Burns'],['slideshow','Slideshow'],['timelapse','Timelapse'],['narrated','🎙️ Thuyết minh AI']].map(([v,l])=>(
-            <button key={v} className={`seg-btn${mode===v?' on':''}`} onClick={()=>set('mode')(v)}>{l}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* Effect type — chỉ khi Ken Burns */}
-      {mode==='kenburns' && (
+        {/* Hiệu ứng — gồm nút Thuyết minh AI (narrated) */}
         <div className="field">
-          <label className="flabel">Kiểu chuyển động Ken Burns</label>
-          <div className="seg" style={{flexWrap:'wrap'}}>
-            {effectOptions.map(([v,l])=>(
-              <button key={v}
-                className={`seg-btn${currentEffect===v?' on':''}`}
-                style={{flex:'1 1 45%',minWidth:'45%'}}
-                onClick={()=>pickEffect(v)}>
-                {l}
+          <label className="flabel">Hiệu ứng</label>
+          <div className="seg">
+            {[['kenburns','Ken Burns'],['slideshow','Slideshow'],['timelapse','Timelapse'],['narrated','🎙️ Thuyết minh AI']].map(([v,l])=>(
+              <button key={v} className={`seg-btn${mode===v?' on':''}`} onClick={()=>set('mode')(v)}>{l}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Kiểu chuyển động — chỉ khi Ken Burns */}
+        {mode==='kenburns' && (
+          <div className="field">
+            <label className="flabel">Kiểu chuyển động</label>
+            <div className="chips">
+              {effectOptions.map(([v,l])=>(
+                <button key={v} type="button"
+                  className={`chip${currentEffect===v?' on':''}`}
+                  onClick={()=>pickEffect(v)}>
+                  {l}
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`chip${currentEffect==='random'?' on':''}`}
+                onClick={()=>onChange({ ...settings, effectType: 'random' })}>
+                Random mỗi ảnh
               </button>
-            ))}
-            <button
-              type="button"
-              key="random"
-              className={`seg-btn${currentEffect==='random'?' on':''}`}
-              style={{flex:'1 1 100%',minWidth:'100%',marginTop:4}}
-              onClick={()=>onChange({ ...settings, effectType: 'random' })}>
-              🎲 Random — mỗi ảnh chọn ngẫu nhiên 1 trong 4 kiểu (một ảnh = một hiệu ứng)
-            </button>
-          </div>
-          <div style={{fontSize:10,color:'var(--muted)',marginTop:6,fontStyle:'italic'}}>
-            {currentEffect==='random'
-              ? 'Mỗi cảnh (mỗi ảnh) được gán riêng zoom-in / zoom-out / pan trái→phải / pan phải→trái; không trộn nhiều kiểu trên cùng một ảnh.'
-              : 'Chọn cố định: mọi ảnh dùng cùng họ hiệu ứng (có thể khác biến thể nhẹ giữa các ảnh). Pan = lia ngang.'}
-          </div>
-        </div>
-      )}
-
-      {/* Thuyết minh AI — chỉ khi mode==='narrated' */}
-      {mode==='narrated' && (
-        <div className="field">
-          <label className="flabel">🎙️ Giọng đọc AI</label>
-
-          <label className="flabel" style={{marginBottom:6,marginTop:4}}>Phong cách</label>
-          <div className="seg" style={{marginBottom:8}}>
-            {[['haihuoc','😜 Hài hước'],['lichsu','🤵 Lịch sự']].map(([v,l])=>(
-              <button
-                key={v}
-                type="button"
-                className={`seg-btn${narrationPersona===v?' on':''}`}
-                onClick={()=>set('narrationPersona')(v)}
-              >{l}</button>
-            ))}
-          </div>
-
-          <label className="flabel" style={{marginBottom:6}}>Nhà cung cấp giọng (TTS)</label>
-          <div className="seg" style={{marginBottom:8}}>
-            {[['google','🆓 Google (free)'],['elevenlabs','ElevenLabs'],['fpt','FPT.AI']].map(([v,l])=>(
-              <button
-                key={v}
-                type="button"
-                className={`seg-btn${ttsProvider===v?' on':''}`}
-                onClick={()=>set('ttsProvider')(v)}
-              >{l}</button>
-            ))}
-          </div>
-
-          {ttsProvider!=='google' && (
-            <input
-              className="inp body-font"
-              placeholder={ttsProvider==='fpt'
-                ? 'banmai / lannhi / leminh… (bỏ trống = giọng mặc định)'
-                : 'Voice ID (bỏ trống = giọng mặc định)'}
-              value={voiceId}
-              onChange={e=>set('voiceId')(e.target.value)}
-              style={{marginBottom:8}}
-            />
-          )}
-          {ttsProvider==='google' && (
-            <div className="hint" style={{marginBottom:8,opacity:0.7}}>
-              🆓 Google đọc tiếng Việt miễn phí, không cần key (giọng máy, hợp thử nhanh).
             </div>
-          )}
+            <div className="sect-sub">
+              {currentEffect==='random'
+                ? 'Mỗi cảnh (mỗi ảnh) được gán riêng zoom-in / zoom-out / pan trái→phải / pan phải→trái.'
+                : 'Chọn cố định: mọi ảnh dùng cùng họ hiệu ứng. Pan = lia ngang.'}
+            </div>
+          </div>
+        )}
 
-          <label className="flabel">
-            Số cảnh tối đa &nbsp;
-            <span style={{color:'var(--gold)',fontFamily:'var(--mono)'}}>{maxSegments}</span>
-          </label>
+        {/* Thuyết minh AI — chỉ khi mode==='narrated' */}
+        {mode==='narrated' && (
+          <div className="field">
+            <label className="flabel">🎙️ Giọng đọc AI</label>
+
+            <label className="flabel" style={{marginBottom:6,marginTop:4}}>Phong cách</label>
+            <div className="seg" style={{marginBottom:8}}>
+              {[['haihuoc','😜 Hài hước'],['lichsu','🤵 Lịch sự']].map(([v,l])=>(
+                <button
+                  key={v}
+                  type="button"
+                  className={`seg-btn${narrationPersona===v?' on':''}`}
+                  onClick={()=>set('narrationPersona')(v)}
+                >{l}</button>
+              ))}
+            </div>
+
+            <label className="flabel" style={{marginBottom:6}}>Nhà cung cấp giọng (TTS)</label>
+            <div className="seg" style={{marginBottom:8}}>
+              {[['google','🆓 Google (free)'],['elevenlabs','ElevenLabs'],['fpt','FPT.AI']].map(([v,l])=>(
+                <button
+                  key={v}
+                  type="button"
+                  className={`seg-btn${ttsProvider===v?' on':''}`}
+                  onClick={()=>set('ttsProvider')(v)}
+                >{l}</button>
+              ))}
+            </div>
+
+            {ttsProvider!=='google' && (
+              <input
+                className="inp body-font"
+                placeholder={ttsProvider==='fpt'
+                  ? 'banmai / lannhi / leminh… (bỏ trống = giọng mặc định)'
+                  : 'Voice ID (bỏ trống = giọng mặc định)'}
+                value={voiceId}
+                onChange={e=>set('voiceId')(e.target.value)}
+                style={{marginBottom:8}}
+              />
+            )}
+            {ttsProvider==='google' && (
+              <div className="hint" style={{marginBottom:8,opacity:0.7}}>
+                🆓 Google đọc tiếng Việt miễn phí, không cần key (giọng máy, hợp thử nhanh).
+              </div>
+            )}
+
+            <label className="flabel">
+              Số cảnh tối đa &nbsp;
+              <span style={{color:'var(--gold)',fontFamily:'var(--mono)'}}>{maxSegments}</span>
+            </label>
+            <div className="slider-row">
+              <input type="range" min="3" max="15" step="1" value={maxSegments} onChange={e=>set('maxSegments')(+e.target.value)}/>
+              <span className="slider-val">{maxSegments}</span>
+            </div>
+
+            <div style={{marginTop:10}}>
+              <MusicPicker
+                value={settings.music || ''}
+                onChange={(v)=>set('music')(v)}
+              />
+            </div>
+
+            <div style={{fontSize:10,color:'var(--muted)',marginTop:6,fontStyle:'italic'}}>
+              ⚙️ Cần Claude Code đăng nhập hoặc ANTHROPIC_API_KEY + key TTS trên máy chạy backend.
+            </div>
+          </div>
+        )}
+
+        {/* Photo limit */}
+        <div className="field">
+          <label className="flabel">Số ảnh mỗi listing <span className="val">{safePhotoLimit}</span></label>
           <div className="slider-row">
-            <input type="range" min="3" max="15" step="1" value={maxSegments} onChange={e=>set('maxSegments')(+e.target.value)}/>
-            <span className="slider-val">{maxSegments}</span>
-          </div>
-
-          <div style={{marginTop:10}}>
-            <MusicPicker
-              value={settings.music || ''}
-              onChange={(v)=>set('music')(v)}
-            />
-          </div>
-
-          <div style={{fontSize:10,color:'var(--muted)',marginTop:6,fontStyle:'italic'}}>
-            ⚙️ Cần Claude Code đăng nhập hoặc ANTHROPIC_API_KEY + key TTS trên máy chạy backend.
+            <input type="range" min="1" max="40" step="1" value={safePhotoLimit} onChange={e=>set('photoLimit')(+e.target.value)}/>
+            <span className="slider-val">{safePhotoLimit}</span>
           </div>
         </div>
-      )}
 
-      {/* Photo limit */}
-      <div className="field">
-        <label className="flabel">
-          Số ảnh mỗi listing &nbsp;
-          <span style={{color:'var(--gold)',fontFamily:'var(--mono)'}}>{safePhotoLimit}</span>
-        </label>
-        <div className="slider-row">
-          <input type="range" min="1" max="40" step="1" value={safePhotoLimit} onChange={e=>set('photoLimit')(+e.target.value)}/>
-          <span className="slider-val">{safePhotoLimit}</span>
-        </div>
-      </div>
-
-      {/* Per-image time */}
-      <div className="field">
-        <label className="flabel">
-          Thời gian từng ảnh &nbsp;
-          <span style={{color:'var(--gold)',fontFamily:'var(--mono)'}}>{perImg}s</span>
-          {uploadedCount>0&&<span style={{color:'var(--muted)',marginLeft:6}}>≈ tổng {totalTime}s</span>}
-        </label>
-        <div className="slider-row">
-          <input type="range" min="1.5" max="10" step="0.5" value={perImg} onChange={e=>set('duration')(+e.target.value)}/>
-          <span className="slider-val">{perImg}s</span>
-        </div>
-      </div>
-
-      {/* Zoom intensity */}
-      {mode==='kenburns' && (
         <div className="field">
           <label className="flabel">
-            Cường độ zoom &nbsp;
-            <span style={{color:'var(--gold)',fontFamily:'var(--mono)'}}>{zoom}</span>
+            Thời gian từng ảnh <span className="val">{perImg}s</span>
+            {uploadedCount>0&&<span style={{color:'var(--muted)',marginLeft:6,fontWeight:500}}>≈ tổng {totalTime}s</span>}
           </label>
           <div className="slider-row">
-            <input type="range" min="0" max="1" step="0.05" value={zoom} onChange={e=>set('zoom')(+e.target.value)}/>
-            <span className="slider-val">{zoom}</span>
+            <input type="range" min="1.5" max="10" step="0.5" value={perImg} onChange={e=>set('duration')(+e.target.value)}/>
+            <span className="slider-val">{perImg}s</span>
           </div>
         </div>
-      )}
 
-      {/* Format */}
-      <div className="field">
-        <label className="flabel">Định dạng</label>
-        <div>
-          <div className="toggle-row">
-            <div className="ti">
-              <div className="t1">9:16 TikTok / Reels</div>
-              <div className="t2">1080 × 1920px</div>
+        {mode==='kenburns' && (
+          <div className="field">
+            <label className="flabel">Cường độ zoom <span className="val">{zoom}</span></label>
+            <div className="slider-row">
+              <input type="range" min="0" max="1" step="0.05" value={zoom} onChange={e=>set('zoom')(+e.target.value)}/>
+              <span className="slider-val">{zoom}</span>
             </div>
-            <div className={`toggle${tiktok?' on':''}`} onClick={()=>set('tiktok')(!tiktok)}/>
           </div>
-        </div>
-      </div>
+        )}
 
-      {/* Grid intro toggle */}
-      <div className="field">
-        <label className="flabel">Ảnh bìa lưới</label>
+        <div className="toggle-row">
+          <div className="ti">
+            <div className="t1">9:16 TikTok / Reels</div>
+            <div className="t2">1080 × 1920px</div>
+          </div>
+          <div className={`toggle${tiktok?' on':''}`} onClick={()=>set('tiktok')(!tiktok)}/>
+        </div>
         <div className="toggle-row">
           <div className="ti">
             <div className="t1">Lưới 2×2 ở đầu video</div>
@@ -253,11 +280,10 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
           </div>
           <div className={`toggle${gridIntro?' on':''}`} onClick={()=>set('gridIntro')(!gridIntro)}/>
         </div>
-      </div>
+      </Section>
 
-      {/* Listing overlay toggle */}
-      <div className="field">
-        <label className="flabel">Hiển thị thông tin listing</label>
+      {/* ══ 2. OVERLAY LISTING ══ */}
+      <Section title="Overlay listing">
         <div className="toggle-row">
           <div className="ti">
             <div className="t1">Overlay xuyên suốt video</div>
@@ -265,31 +291,31 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
           </div>
           <div className={`toggle${useOverlay?' on':''}`} onClick={()=>set('useOverlay')(!useOverlay)}/>
         </div>
+
         {useOverlay && (
-          <div style={{marginTop:8}}>
-            {priceTypeOptions.map(([key, label, source]) => (
-              <div key={key} className="toggle-row">
-                <div className="ti">
-                  <div className="t1">{label}</div>
-                  <div className="t2">{source}</div>
-                </div>
-                <div
-                  className={`toggle${overlayPriceTypes.includes(key)?' on':''}`}
-                  onClick={()=>togglePriceType(key)}
-                />
+          <div style={{marginTop:12}}>
+            <div className="field">
+              <label className="flabel">Dòng giá hiển thị</label>
+              <div className="chips">
+                {priceTypeOptions.map(([key, label, source]) => {
+                  const on = overlayPriceTypes.includes(key)
+                  return (
+                    <button
+                      key={key} type="button" title={source}
+                      className={`chip${on?' on':''}`}
+                      onClick={()=>togglePriceType(key)}
+                    >{on ? '✓ ' : ''}{label}</button>
+                  )
+                })}
               </div>
-            ))}
-            <div className="font-tool">
-              <div className="flabel" style={{marginBottom:8}}>Tool chỉnh phông chữ listing</div>
+              <div className="sect-sub">Bật/tắt từng dòng giá lấy từ API listing (di chuột xem nguồn dữ liệu).</div>
+            </div>
+
+            <div className="field">
+              <label className="flabel">Font chữ listing</label>
               <div className="seg">
                 {fontOptions.map(([v,l])=>(
-                  <button
-                    key={v}
-                    className={`seg-btn${overlayFont===v?' on':''}`}
-                    onClick={()=>set('overlayFont')(v)}
-                  >
-                    {l}
-                  </button>
+                  <button key={v} className={`seg-btn${overlayFont===v?' on':''}`} onClick={()=>set('overlayFont')(v)}>{l}</button>
                 ))}
               </div>
               <div className="font-preview" style={{fontFamily: overlayFont === 'lilita' ? '"Bebas Neue", sans-serif' : 'Georgia, serif'}}>
@@ -299,103 +325,201 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
                 <input type="range" min="0.5" max="1.35" step="0.05" value={overlayScale} onChange={e=>set('overlayScale')(+e.target.value)}/>
                 <span className="slider-val">{Number(overlayScale).toFixed(2)}×</span>
               </div>
-              <div className="color-grid">
-                <label>
-                  <span>Màu tiêu đề</span>
-                  <input type="color" value={titleColor} onChange={e=>set('titleColor')(e.target.value)}/>
-                </label>
-                <label>
-                  <span>Màu nội dung</span>
-                  <input type="color" value={overlayText} onChange={e=>set('overlayText')(e.target.value)}/>
-                </label>
-                {template === 'sunset' && (
-                  <label>
-                    <span>Màu viền</span>
-                    <input type="color" value={strokeColor} onChange={e=>set('strokeColor')(e.target.value)}/>
-                  </label>
-                )}
-                {template !== 'sunset' && (
-                  <label>
-                    <span>Nền tiêu đề</span>
-                    <input type="color" value={titleBg || '#6F4A30'} onChange={e=>set('titleBg')(e.target.value)}/>
-                  </label>
-                )}
-                <label>
-                  <span>Nền nội dung</span>
-                  <input type="color" value={bodyBg || (template === 'daiky' ? '#A88B6E' : '#000000')} onChange={e=>set('bodyBg')(e.target.value)}/>
-                </label>
-              </div>
-              <div style={{fontSize:10,color:'var(--muted)',marginTop:4,fontStyle:'italic'}}>
-                Tách riêng màu chữ &amp; màu nền cho tiêu đề và nội dung. Viền chỉ áp cho Sunset.
-              </div>
             </div>
-            <div style={{marginTop:10}}>
-              <div className="flabel" style={{marginBottom:4}}>Tiện nghi (mỗi dòng 1 mục, hoặc cách bằng " - ")</div>
+
+            <div className="color-grid">
+              <label>
+                <span>Màu tiêu đề</span>
+                <input type="color" value={titleColor} onChange={e=>set('titleColor')(e.target.value)}/>
+              </label>
+              <label>
+                <span>Màu nội dung</span>
+                <input type="color" value={overlayText} onChange={e=>set('overlayText')(e.target.value)}/>
+              </label>
+              {template === 'sunset' && (
+                <label>
+                  <span>Màu viền</span>
+                  <input type="color" value={strokeColor} onChange={e=>set('strokeColor')(e.target.value)}/>
+                </label>
+              )}
+              {template !== 'sunset' && (
+                <label>
+                  <span>Nền tiêu đề</span>
+                  <input type="color" value={titleBg || '#6F4A30'} onChange={e=>set('titleBg')(e.target.value)}/>
+                </label>
+              )}
+              <label>
+                <span>Nền nội dung</span>
+                <input type="color" value={bodyBg || (template === 'daiky' ? '#A88B6E' : '#000000')} onChange={e=>set('bodyBg')(e.target.value)}/>
+              </label>
+            </div>
+            <div className="sect-sub">Tách riêng màu chữ & màu nền cho tiêu đề và nội dung. Viền chỉ áp cho Sunset.</div>
+
+            <div className="field" style={{marginTop:10}}>
+              <label className="flabel">Tiện nghi (mỗi dòng 1 mục, hoặc cách bằng " - ")</label>
               <textarea
                 className="inp body-font textarea"
                 placeholder={`Máy chiếu netflix\nBếp nấu\nCửa sổ thoáng\nGương checkin\nWc khép kín\nGửi xe free`}
                 value={amenitiesText}
                 onChange={e=>set('amenitiesText')(e.target.value)}
-                style={{minHeight:80}}
+                style={{minHeight:110}}
               />
-              <div style={{fontSize:10,color:'var(--muted)',marginTop:4,fontStyle:'italic'}}>
-                Ghi đè amenities từ API. Để trống = dùng giá trị API (nếu có).
-              </div>
+              <div className="sect-sub">Ghi đè amenities từ API. Để trống = dùng giá trị API (nếu có).</div>
               {apiAmenities.length > 0 && (
-                <div style={{fontSize:10,color:'var(--gold)',marginTop:4}}>
+                <div style={{fontSize:11,color:'var(--gold)',marginTop:4,fontWeight:600}}>
                   ✓ API có {apiAmenities.length} tiện nghi: {apiAmenities.slice(0,6).join(' · ')}{apiAmenities.length > 6 ? '…' : ''}
                 </div>
               )}
               {apiAmenities.length === 0 && (
-                <div style={{fontSize:10,color:'var(--muted)',marginTop:4}}>
-                  API chưa có amenities — điền tay vào ô trên để hiển thị.
-                </div>
+                <div className="sect-sub">API chưa có amenities — điền tay vào ô trên để hiển thị.</div>
               )}
             </div>
           </div>
         )}
-      </div>
+      </Section>
 
-      {/* Title + Watermark */}
-      <div className="field">
-        <label className="flabel">Tiêu đề đầu video</label>
-        <textarea
-          className="inp body-font textarea"
-          placeholder={`POV\nKhi bạn tìm được homestay xịn`}
-          value={title}
-          onChange={e=>set('title')(e.target.value)}
-          style={{minHeight:60}}
-        />
-        <div className="slider-row" style={{marginTop:8}}>
-          <input
-            type="range"
-            min="0.5"
-            max="10"
-            step="0.5"
-            value={titleSecs}
-            onChange={e=>set('titleDuration')(+e.target.value)}
+      {/* ══ 3. TIÊU ĐỀ & CHỮ ══ */}
+      <Section title="Tiêu đề & watermark">
+        <div className="field">
+          <label className="flabel">Tiêu đề đầu video · hiện <span className="val">{titleSecs}s</span></label>
+          <textarea
+            className="inp body-font textarea"
+            placeholder={`POV\nKhi bạn tìm được homestay xịn`}
+            value={title}
+            onChange={e=>set('title')(e.target.value)}
+            style={{minHeight:60}}
           />
-          <span className="slider-val">{titleSecs}s</span>
+          <div className="slider-row" style={{marginTop:8}}>
+            <input type="range" min="0.5" max="10" step="0.5" value={titleSecs} onChange={e=>set('titleDuration')(+e.target.value)}/>
+            <span className="slider-val">{titleSecs}s</span>
+          </div>
+          <div className="sect-sub">Tiêu đề hiển thị trước; sau đó overlay listing hiển thị đến hết video.</div>
         </div>
-        <div style={{fontSize:10,color:'var(--muted)',marginTop:4,fontStyle:'italic'}}>
-          Tiêu đề hiển thị trước; sau đó overlay listing hiển thị đến hết video.
+
+        <FontUpload
+          value={settings.customFont || ''}
+          onChange={(v) => set('customFont')(v)}
+          previewText={(title || '').split(/[\n|]/)[0]}
+        />
+
+        <div className="field">
+          <label className="flabel">Watermark</label>
+          <input className="inp body-font" placeholder="© Tên của bạn" value={watermark} onChange={e=>set('watermark')(e.target.value)}/>
         </div>
-      </div>
+      </Section>
 
-      {/* Custom title font (bring-your-own) */}
-      <FontUpload
-        value={settings.customFont || ''}
-        onChange={(v) => set('customFont')(v)}
-        previewText={(title || '').split(/[\n|]/)[0]}
-      />
-      <div className="field">
-        <label className="flabel">Watermark</label>
-        <input className="inp body-font" placeholder="© Tên của bạn" value={watermark} onChange={e=>set('watermark')(e.target.value)}/>
-      </div>
+      {/* ══ 4. THUMBNAIL (ẢNH BÌA) ══ */}
+      <Section title="Kiểu thumbnail">
+        <div className="field">
+          <label className="flabel">Kiểu thumbnail</label>
+          <div className="tpl-grid">
+            {THUMB_TPLS.map(([v, label, img]) => (
+              <button
+                key={v || 'classic'}
+                type="button"
+                className={`tpl-card ratio-thumb${thumbTemplate===v?' on':''}`}
+                onClick={()=>set('thumbTemplate')(v)}
+              >
+                {img
+                  ? <img src={img} alt={label} loading="lazy" />
+                  : <span className="tpl-dice">🎲</span>}
+                <span className="tpl-name">{label}</span>
+                <span className="tpl-check">✓</span>
+              </button>
+            ))}
+          </div>
+          <div className="sect-sub">{thumbDesc}</div>
+        </div>
 
-      {/* ── Tự đăng social (qua webhook Make.com / n8n) ── */}
-      <div className="field">
-        <label className="flabel">📤 Tự đăng social</label>
+        <div className="field">
+          <label className="flabel">Font tiêu đề</label>
+          <div className="seg">
+            {[
+              ['Baloo2-Bold.ttf', 'Baloo tròn'],
+              ['Baloo2-ExtraBold.ttf', 'Baloo đậm'],
+              ['Prata-Regular.ttf', 'Prata serif'],
+            ].map(([v,l])=>(
+              <button key={v} type="button" className={`seg-btn${thumbTitleFont===v?' on':''}`} onClick={()=>set('thumbTitleFont')(v)}>{l}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="field">
+          <input
+            className="inp body-font"
+            placeholder="Tiêu đề lớn (vd Sunset) — trống = nickname"
+            value={thumbTitle}
+            onChange={e=>set('thumbTitle')(e.target.value)}
+            style={{marginBottom:8}}
+          />
+          {(thumbTemplate==='creamgrid' || thumbTemplate==='random') && (
+            <input
+              className="inp body-font"
+              placeholder="Chữ trên ảnh CreamGrid (vd Disco Room) — trống = bỏ"
+              value={settings.thumbCaption || ''}
+              onChange={e=>set('thumbCaption')(e.target.value)}
+              style={{marginBottom:8}}
+            />
+          )}
+          <input
+            className="inp body-font"
+            placeholder="Dòng giá (vd 2h 249k- 4h 367k- Qua đêm 449k)"
+            value={thumbPrice}
+            onChange={e=>set('thumbPrice')(e.target.value)}
+            style={{marginBottom:8}}
+          />
+          <input
+            className="inp body-font"
+            placeholder="@handle (vd @tranhouse_hanoi)"
+            value={thumbWatermark}
+            onChange={e=>set('thumbWatermark')(e.target.value)}
+          />
+        </div>
+
+        <div className="color-grid">
+          <label>
+            <span>Màu viền tiêu đề</span>
+            <input type="color" value={thumbStrokeColor} onChange={e=>set('thumbStrokeColor')(e.target.value)}/>
+          </label>
+          <label>
+            <span>Màu nền data</span>
+            <input type="color" value={thumbPillColor} onChange={e=>set('thumbPillColor')(e.target.value)}/>
+          </label>
+        </div>
+
+        <div className="field" style={{marginTop:10}}>
+          <label className="flabel">Độ dày viền <span className="val">{thumbStrokeWidth}px</span></label>
+          <div className="slider-row">
+            <input type="range" min="0" max="14" step="1" value={thumbStrokeWidth} onChange={e=>set('thumbStrokeWidth')(+e.target.value)}/>
+            <span className="slider-val">{thumbStrokeWidth}px</span>
+          </div>
+        </div>
+        <div className="field">
+          <label className="flabel">Độ đậm nền data <span className="val">{Math.round(thumbPillAlpha*100)}%</span></label>
+          <div className="slider-row">
+            <input type="range" min="0.05" max="0.8" step="0.05" value={thumbPillAlpha} onChange={e=>set('thumbPillAlpha')(+e.target.value)}/>
+            <span className="slider-val">{Math.round(thumbPillAlpha*100)}%</span>
+          </div>
+        </div>
+        <div className="field">
+          <label className="flabel">Cỡ chữ tiêu đề <span className="val">{Number(thumbTitleScale).toFixed(2)}×</span></label>
+          <div className="slider-row">
+            <input type="range" min="0.5" max="1.6" step="0.05" value={thumbTitleScale} onChange={e=>set('thumbTitleScale')(+e.target.value)}/>
+            <span className="slider-val">{Number(thumbTitleScale).toFixed(2)}×</span>
+          </div>
+        </div>
+        <div className="field">
+          <label className="flabel">Cỡ chữ data <span className="val">{Number(thumbDataScale).toFixed(2)}×</span></label>
+          <div className="slider-row">
+            <input type="range" min="0.6" max="1.5" step="0.05" value={thumbDataScale} onChange={e=>set('thumbDataScale')(+e.target.value)}/>
+            <span className="slider-val">{Number(thumbDataScale).toFixed(2)}×</span>
+          </div>
+        </div>
+        <div className="sect-sub">Địa chỉ & tiện nghi lấy theo listing (tiện nghi dùng chung ô ở trên). Bấm "Tạo Thumbnail" ở cột 3.</div>
+      </Section>
+
+      {/* ══ 5. TỰ ĐĂNG SOCIAL ══ */}
+      <Section title="Tự đăng social">
         <div className="toggle-row">
           <div className="ti">
             <div className="t1">Gửi video sau khi render xong</div>
@@ -404,7 +528,7 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
           <div className={`toggle${autoPost?' on':''}`} onClick={()=>set('autoPost')(!autoPost)}/>
         </div>
         {autoPost && (
-          <div style={{marginTop:8}}>
+          <div style={{marginTop:10}}>
             <input
               className="inp body-font"
               placeholder="Dán link Webhook từ Make.com (https://hook…)"
@@ -426,192 +550,33 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
               </div>
               <div className={`toggle${postFacebook?' on':''}`} onClick={()=>set('postFacebook')(!postFacebook)}/>
             </div>
-            <div style={{fontSize:10,color:'var(--muted)',marginTop:4,fontStyle:'italic'}}>
+            <div className="sect-sub">
               Render xong app tự gửi video + thông tin (tiêu đề, giá, địa chỉ, tiện nghi) tới webhook.
               Gửi lỗi sẽ báo ở thanh tiến trình nhưng KHÔNG làm hỏng video.
             </div>
           </div>
         )}
-      </div>
+      </Section>
 
-      {/* Output mode — bấm "Tạo" xuất gì (áp dụng cả listing đơn lẫn nhiều listing) */}
-      <div className="field">
-        <label className="flabel">Khi bấm Tạo → xuất gì</label>
-        <div className="seg" style={{flexWrap:'wrap'}}>
+      {/* ══ 6. XUẤT GÌ KHI BẤM TẠO ══ */}
+      <Section title="Khi bấm Tạo → xuất gì">
+        <div className="seg">
           {[
-            ['both', '🎬+🖼️ Cả hai'],
-            ['video', '🎬 Chỉ video'],
-            ['thumbnail', '🖼️ Chỉ thumbnail'],
+            ['both', 'Cả hai'],
+            ['video', 'Chỉ video'],
+            ['thumbnail', 'Chỉ thumbnail'],
           ].map(([v,l])=>(
             <button
-              key={v}
-              type="button"
+              key={v} type="button"
               className={`seg-btn${(settings.batchMode||'both')===v?' on':''}`}
-              style={{flex:'1 1 30%',minWidth:'30%'}}
               onClick={()=>set('batchMode')(v)}
             >{l}</button>
           ))}
         </div>
-        <div style={{fontSize:10,color:'var(--muted)',marginTop:4,fontStyle:'italic'}}>
-          Áp dụng cho cả listing đơn lẫn nhiều listing. “Chỉ thumbnail” = chỉ tạo ảnh bìa, KHÔNG render video → nhanh hơn nhiều.
+        <div className="sect-sub">
+          Áp dụng cho cả listing đơn lẫn nhiều listing. "Chỉ thumbnail" = chỉ tạo ảnh bìa, KHÔNG render video → nhanh hơn nhiều.
         </div>
-      </div>
-
-      {/* ── Thumbnail (ảnh bìa collage tĩnh) ── */}
-      <div className="field">
-        <label className="flabel">🖼️ Thumbnail (ảnh bìa)</label>
-
-        <label className="flabel" style={{marginBottom:6,marginTop:4}}>Kiểu thumbnail</label>
-        <div className="seg" style={{flexWrap:'wrap',marginBottom:8}}>
-          {[
-            ['', 'Classic'],
-            ['daiky', 'Daiky'],
-            ['valey', 'Valey'],
-            ['peony', 'Peony'],
-            ['tiger', 'Tiger'],
-            ['cento', 'Cento'],
-            ['amber', 'Amber'],
-            ['strip', 'Strip'],
-            ['creamgrid', 'CreamGrid'],
-            ['filmstrip', 'Filmstrip'],
-            ['canva1', 'Canva 1'],
-            ['canva2', 'Canva 2'],
-            ['canva3', 'Canva 3'],
-            ['canva4', 'Canva 4'],
-            ['canva5', 'Canva 5'],
-            ['canva6', 'Canva 6'],
-            ['random', '🎲 Random'],
-          ].map(([v,l])=>(
-            <button
-              key={v||'classic'}
-              type="button"
-              className={`seg-btn${(settings.thumbTemplate||'')===v?' on':''}`}
-              style={{flex:'1 1 30%',minWidth:'30%'}}
-              onClick={()=>set('thumbTemplate')(v)}
-            >{l}</button>
-          ))}
-        </div>
-        <div style={{fontSize:10,color:'var(--muted)',marginBottom:8,fontStyle:'italic'}}>
-          {(settings.thumbTemplate||'')===''
-            ? 'Classic: 1 ảnh lớn + 3 polaroid bên phải. Để trống dữ liệu = tự lấy từ listing.'
-            : (settings.thumbTemplate==='random'
-                ? '🎲 Random: mỗi listing tự bốc 1 trong 15 template khác nhau.'
-                : ({
-                    cento: 'Lưới 2×2 + panel thông tin nâu giữa + nhãn combo 4 góc.',
-                    amber: '1 ảnh hero, khối giá góc trên, tiêu đề serif lớn + pill địa chỉ.',
-                    strip: 'Tiêu đề trên cùng + dải 3 ảnh ngang + giá phía dưới.',
-                    creamgrid: 'Nền kem, chữ serif đỏ, lưới ảnh lệch cột + caption "Disco Room".',
-                    filmstrip: '3 dải ảnh xếp dọc, dải giữa phủ chữ (tiêu đề + tagline + giá).',
-                    canva1: 'Canva T1 (9:16): 3 dải ảnh dọc, tên + tagline + giá Yeseva trắng, địa chỉ uốn cong.',
-                    canva2: 'Canva T2 (9:16): nền lớn + dải 3 ảnh giữa, tên/địa chỉ/giá Yeseva, tiện ích dưới.',
-                    canva3: 'Canva T3 (9:16): lưới 2×2, "homestay" viết tay + tên kèm sao ✦, chữ kem Comic.',
-                    canva4: 'Canva T4 (9:16): mã phòng SIÊU TO giữa, pill tiện ích + panel giá mờ.',
-                    canva5: 'Canva T5 (9:16): "Homestay" chữ brush kem + tên Francois One + giá Poppins.',
-                    canva6: 'Canva T6 (9:16): 2 ảnh dọc, tên Anton kem + 2 panel trắng mờ (tiện ích, giá).',
-                  }[settings.thumbTemplate]
-                  || 'Lưới 2×2 + khối chữ giữa. Valey có bảng giá Trong tuần/Cuối tuần (tự lấy từ prices_by_week).'))}
-        </div>
-
-        <label className="flabel" style={{marginBottom:6}}>Font tiêu đề</label>
-        <div className="seg" style={{marginBottom:8}}>
-          {[
-            ['Baloo2-Bold.ttf', 'Baloo tròn'],
-            ['Baloo2-ExtraBold.ttf', 'Baloo đậm'],
-            ['Prata-Regular.ttf', 'Prata serif'],
-          ].map(([v,l])=>(
-            <button
-              key={v}
-              type="button"
-              className={`seg-btn${thumbTitleFont===v?' on':''}`}
-              onClick={()=>set('thumbTitleFont')(v)}
-            >{l}</button>
-          ))}
-        </div>
-        <input
-          className="inp body-font"
-          placeholder="Tiêu đề lớn (vd Sunset) — trống = nickname"
-          value={thumbTitle}
-          onChange={e=>set('thumbTitle')(e.target.value)}
-          style={{marginBottom:8}}
-        />
-        {['creamgrid','random','canva1'].includes(settings.thumbTemplate||'') && (
-          <input
-            className="inp body-font"
-            placeholder={settings.thumbTemplate==='canva1'
-              ? 'Tagline Canva 1 — trống = "Trạm sạc cảm xúc"'
-              : 'Chữ trên ảnh CreamGrid (vd Disco Room) — trống = bỏ'}
-            value={settings.thumbCaption || ''}
-            onChange={e=>set('thumbCaption')(e.target.value)}
-            style={{marginBottom:8}}
-          />
-        )}
-        <input
-          className="inp body-font"
-          placeholder="Dòng giá (vd 2h 249k- 4h 367k- Qua đêm 449k)"
-          value={thumbPrice}
-          onChange={e=>set('thumbPrice')(e.target.value)}
-          style={{marginBottom:8}}
-        />
-        <input
-          className="inp body-font"
-          placeholder="@handle (vd @tranhouse_hanoi)"
-          value={thumbWatermark}
-          onChange={e=>set('thumbWatermark')(e.target.value)}
-        />
-        <div className="color-grid" style={{marginTop:10}}>
-          <label>
-            <span>Màu viền tiêu đề</span>
-            <input type="color" value={thumbStrokeColor} onChange={e=>set('thumbStrokeColor')(e.target.value)}/>
-          </label>
-          <label>
-            <span>Màu nền data</span>
-            <input type="color" value={thumbPillColor} onChange={e=>set('thumbPillColor')(e.target.value)}/>
-          </label>
-        </div>
-        <div style={{marginTop:8}}>
-          <label className="flabel">
-            Độ dày viền &nbsp;
-            <span style={{color:'var(--gold)',fontFamily:'var(--mono)'}}>{thumbStrokeWidth}px</span>
-          </label>
-          <div className="slider-row">
-            <input type="range" min="0" max="14" step="1" value={thumbStrokeWidth} onChange={e=>set('thumbStrokeWidth')(+e.target.value)}/>
-            <span className="slider-val">{thumbStrokeWidth}px</span>
-          </div>
-        </div>
-        <div>
-          <label className="flabel">
-            Độ đậm nền data &nbsp;
-            <span style={{color:'var(--gold)',fontFamily:'var(--mono)'}}>{Math.round(thumbPillAlpha*100)}%</span>
-          </label>
-          <div className="slider-row">
-            <input type="range" min="0.05" max="0.8" step="0.05" value={thumbPillAlpha} onChange={e=>set('thumbPillAlpha')(+e.target.value)}/>
-            <span className="slider-val">{Math.round(thumbPillAlpha*100)}%</span>
-          </div>
-        </div>
-        <div>
-          <label className="flabel">
-            Cỡ chữ tiêu đề &nbsp;
-            <span style={{color:'var(--gold)',fontFamily:'var(--mono)'}}>{Number(thumbTitleScale).toFixed(2)}×</span>
-          </label>
-          <div className="slider-row">
-            <input type="range" min="0.5" max="1.6" step="0.05" value={thumbTitleScale} onChange={e=>set('thumbTitleScale')(+e.target.value)}/>
-            <span className="slider-val">{Number(thumbTitleScale).toFixed(2)}×</span>
-          </div>
-        </div>
-        <div>
-          <label className="flabel">
-            Cỡ chữ data &nbsp;
-            <span style={{color:'var(--gold)',fontFamily:'var(--mono)'}}>{Number(thumbDataScale).toFixed(2)}×</span>
-          </label>
-          <div className="slider-row">
-            <input type="range" min="0.6" max="1.5" step="0.05" value={thumbDataScale} onChange={e=>set('thumbDataScale')(+e.target.value)}/>
-            <span className="slider-val">{Number(thumbDataScale).toFixed(2)}×</span>
-          </div>
-        </div>
-        <div style={{fontSize:10,color:'var(--muted)',marginTop:4,fontStyle:'italic'}}>
-          Địa chỉ &amp; tiện nghi lấy theo listing (tiện nghi dùng chung ô ở trên). Bấm “🖼️ Tạo Thumbnail” ở cột 3.
-        </div>
-      </div>
+      </Section>
 
       {uploadedCount>0 && (
         <div className="summary">

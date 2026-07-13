@@ -24,9 +24,12 @@ if [ -f "$ROOT/.secrets.env" ]; then
   echo "🔑  Đã nạp khoá API từ .secrets.env"
 fi
 
+BACKEND_LOG="/tmp/genvideo-backend.log"
 BACKEND_PID=""
 STARTED_BACKEND=0
+TAIL_PID=""
 cleanup() {
+  [ -n "$TAIL_PID" ] && kill "$TAIL_PID" 2>/dev/null || true  # dừng luồng log ra terminal
   if [ "$STARTED_BACKEND" = "1" ] && [ -n "$BACKEND_PID" ]; then
     echo
     echo "🧹  Đang tắt backend (do script này bật)..."
@@ -54,7 +57,7 @@ if curl -sf http://localhost:8080/api/health >/dev/null 2>&1; then
 else
   echo "▶   [2/3] Khởi động backend: go run . --web --port 8080"
   # exec trong subshell → \$! chính là PID của 'go run' (server là tiến trình con của nó)
-  ( cd backend && exec go run . --web --port 8080 ) > /tmp/genvideo-backend.log 2>&1 &
+  ( cd backend && exec go run . --web --port 8080 ) > "$BACKEND_LOG" 2>&1 &
   BACKEND_PID=$!
   STARTED_BACKEND=1
   ok=0
@@ -66,8 +69,15 @@ else
     sleep 1
   done
   [ "$ok" = "1" ] || { echo "❌  Backend không phản hồi sau 90s. Log:"; tail -n 40 /tmp/genvideo-backend.log; exit 1; }
-  echo "✅  Backend chạy ở http://localhost:8080  (log: /tmp/genvideo-backend.log)"
+  echo "✅  Backend chạy ở http://localhost:8080  (log: $BACKEND_LOG)"
 fi
+
+# ── 2b) Hiển thị log truy cập ngay trên terminal này ───────
+# Backend ghi log ra file → stream về màn hình để thấy ai đang dùng (👤).
+echo "📡  Log truy cập sẽ hiện bên dưới (👤 = người dùng mới):"
+touch "$BACKEND_LOG"
+tail -n 0 -f "$BACKEND_LOG" &
+TAIL_PID=$!
 
 # ── 3) Link public qua Cloudflare ──────────────────────────
 echo "🌐  [3/3] Tạo link public bằng Cloudflare (start-web.sh)..."

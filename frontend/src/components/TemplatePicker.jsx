@@ -1,10 +1,19 @@
 import { useState, useEffect } from 'react'
 import { fetchTemplates } from '../api/templates'
 
-const EMOJI = {
-  random:  '🎲',
-  daiky:   '🏡',
-  sunset:  '🌅',
+// Ảnh nhận diện từng template (render mẫu theo thiết kế Canva gốc).
+// Thiếu ảnh → ô gradient + chữ cái đầu.
+const IMG = {
+  daiky:      '/templates/video-daiky.jpg',
+  sunset:     '/templates/video-sunset.jpg',
+  chillgreen: '/templates/video-chillgreen.jpg',
+  creampill:  '/templates/video-creampill.jpg',
+  editorial:  '/templates/video-editorial.jpg',
+  goldserif:  '/templates/video-goldserif.jpg',
+  marquee:    '/templates/video-marquee.jpg',
+  staycation: '/templates/video-staycation.jpg',
+  amorex:     '/templates/video-amorex.jpg',
+  ntgroom:    '/templates/video-ntgroom.jpg',
 }
 
 // "Random" = mẫu ảo: không phải file template, backend tự bốc 1 mẫu thật cho mỗi video.
@@ -20,27 +29,33 @@ export default function TemplatePicker({ value, onChange }) {
       .catch(e => setErr(e.message || 'Không tải được template'))
   }, [])
 
+  const all = [RANDOM, ...templates]
+  const active = all.find(t => t.name === value)
+
   return (
     <div className="field">
-      <label className="flabel">Mẫu thiết kế (Template)</label>
-      {err && <div style={{fontSize:10, color:'var(--red)', marginBottom:4}}>{err}</div>}
-      <div className="template-grid">
-        {[RANDOM, ...templates].map(t => (
+      <label className="flabel">Mẫu thiết kế video</label>
+      {err && <div className="tpl-err">{err}</div>}
+      <div className="tpl-grid">
+        {all.map(t => (
           <button
             type="button"
             key={t.name}
-            className={`template-card${value === t.name ? ' on' : ''}`}
+            title={t.description}
+            className={`tpl-card ratio-video${value === t.name ? ' on' : ''}`}
             onClick={() => onChange(t.name)}
           >
-            <div className="template-thumb">{EMOJI[t.name] || '🎨'}</div>
-            <div className="template-name">{t.display_name}</div>
-            <div className="template-desc">{t.description}</div>
+            {t.name === 'random'
+              ? <span className="tpl-dice">🎲</span>
+              : IMG[t.name]
+                ? <img src={IMG[t.name]} alt={t.display_name} loading="lazy" />
+                : <span className="tpl-dice">{(t.display_name || '?')[0]}</span>}
+            <span className="tpl-name">{t.display_name}</span>
+            <span className="tpl-check">✓</span>
           </button>
         ))}
       </div>
-      <div style={{fontSize:10, color:'var(--muted)', marginTop:6, fontStyle:'italic'}}>
-        Mỗi template = bộ font/màu/layout riêng. Chọn để xem hiệu ứng khi render.
-      </div>
+      {active && <div className="sect-sub">✓ {active.display_name} — {active.description}</div>}
     </div>
   )
 }

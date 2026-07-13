@@ -17,24 +17,41 @@ export function RenderPanel({ canRender, onRender, rendering, done, pct, progTex
   const pendingCount = queue?.filter(q => q.status==='pending').length || 0
   const doneCount    = queue?.filter(q => q.status==='done').length    || 0
   const totalCount   = queue?.length || 0
-  // Listing đơn: nhãn nút đổi theo chế độ xuất đã chọn.
-  const singleLabel = batchMode === 'video'     ? '🚀  Tạo video'
-                    : batchMode === 'thumbnail' ? '🖼️  Tạo thumbnail'
-                    :                             '🚀  Tạo video + ảnh bìa'
+  // Listing đơn: nhãn nút đổi theo chế độ xuất đã chọn (giữ nguyên cả khi disabled).
+  const singleLabel = batchMode === 'video'     ? 'Tạo video'
+                    : batchMode === 'thumbnail' ? 'Tạo thumbnail'
+                    :                             'Tạo video + ảnh bìa'
+  const idle = !rendering && !done && !error && !isQueueMode
 
   return (
     <div className="render-panel">
+      {/* Điểm neo thị giác khi chưa render — khung 9:16 như mockup */}
+      {idle && (
+        <>
+          <div className="reel-ph">
+            <span className="fmt">1080×1920</span>
+            <span className="msg">{canRender ? 'Bấm nút dưới để dựng reel' : 'Video 9:16 sẽ hiện ở đây'}</span>
+          </div>
+          <div className="spec-chips">
+            <span>MP4 · H.264</span><span>9:16</span><span>30 fps</span>
+          </div>
+        </>
+      )}
+
       <button className="btn btn-gold btn-full" onClick={onRender} disabled={!canRender||rendering}>
         {rendering
           ? <><span className="spin">⟳</span> Đang render...</>
           : isQueueMode && pendingCount > 0
-            ? `🚀  Render ${pendingCount} listing`
+            ? `Render ${pendingCount} listing`
             : isQueueMode && pendingCount === 0
-              ? '✅  Tất cả đã xong'
-              : canRender
-                ? singleLabel
-                : 'Chọn ảnh trước'}
+              ? 'Tất cả đã xong ✓'
+              : singleLabel}
       </button>
+      {!canRender && !rendering && !isQueueMode && (
+        <div style={{fontSize:11,color:'var(--muted)',textAlign:'center',marginTop:-6}}>
+          Chọn ảnh ở cột 1 trước
+        </div>
+      )}
 
       {/* Queue progress */}
       {isQueueMode && totalCount > 0 && (
@@ -74,17 +91,17 @@ export function RenderPanel({ canRender, onRender, rendering, done, pct, progTex
       {/* Download — only show for single mode */}
       {done && !isQueueMode && (
         <button className="btn btn-gold btn-full" onClick={downloadVideo}>
-          ⬇  Tải video xuống
+          Tải video xuống ↓
         </button>
       )}
 
       {/* ── Thumbnail (ảnh collage tĩnh) ── */}
       <div style={{marginTop:6,paddingTop:12,borderTop:'1px solid var(--border)'}}>
-        <div className="plabel" style={{marginBottom:8}}>🖼️ Thumbnail (ảnh bìa)</div>
+        <div className="plabel" style={{marginBottom:8}}>Thumbnail (ảnh bìa)</div>
         <button className="btn btn-outline btn-full" onClick={onThumbnail} disabled={!canThumbnail||thumbBusy}>
           {thumbBusy
             ? <><span className="spin">⟳</span> Đang tạo ảnh...</>
-            : canThumbnail ? '🖼️  Tạo Thumbnail' : 'Chọn ảnh trước'}
+            : 'Tạo Thumbnail'}
         </button>
         {thumbErr && <div style={{color:'var(--red)',fontSize:11,marginTop:6}}>{thumbErr}</div>}
         {thumbUrl && (
@@ -100,7 +117,7 @@ export function RenderPanel({ canRender, onRender, rendering, done, pct, progTex
               download="thumbnail.jpg"
               style={{marginTop:8,textDecoration:'none',textAlign:'center'}}
             >
-              ⬇  Tải thumbnail
+              Tải thumbnail ↓
             </a>
           </div>
         )}
@@ -223,7 +240,7 @@ export function HistoryPanel({ refresh }) {
         }
       </div>
       <button className="btn btn-green btn-full" onClick={exportExcel} disabled={history.length===0}>
-        📊  Xuất Excel
+        Xuất Excel
       </button>
 
       {preview && (
@@ -286,7 +303,7 @@ export function ThumbnailHistoryPanel({ refresh }) {
     <div className="render-panel" style={{paddingTop:0}}>
       <hr className="sep"/>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
-        <span className="plabel">🖼️ Lịch sử thumbnail</span>
+        <span className="plabel">Lịch sử thumbnail</span>
         <span style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--muted)'}}>{items.length} ảnh</span>
       </div>
       <div className="hist-toolbar">

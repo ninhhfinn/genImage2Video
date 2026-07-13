@@ -84,7 +84,7 @@ export default function FontUpload({ value = '', onChange, previewText }) {
         />
         <button
           type="button"
-          className="seg-btn"
+          className="btn btn-outline btn-sm"
           disabled={busy}
           onClick={() => fileRef.current?.click()}
         >

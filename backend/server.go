@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -49,24 +50,24 @@ type RenderRequest struct {
 	TitleFontFile string  `json:"title_font_file"` // uploaded/custom font for title+nickname
 
 	// Listing overlay
-	Address     string   `json:"address"`
-	Nickname    string   `json:"nickname"`
-	ListingID   string   `json:"listing_id"`
-	Prices      []string `json:"prices"`
-	Amenities   []string `json:"amenities"`
-	EffectType   string   `json:"effect_type"`  // một kiểu cố định hoặc "random"
-	EffectTypes  []string `json:"effect_types"` // thường 1 phần tử; hoặc ["random"]
-	OverlayStyle string   `json:"overlay_style"` // "badge" | "bubble"
-	OverlayFont  string   `json:"overlay_font"`
-	OverlayScale float64  `json:"overlay_scale"`
-	OverlayText  string   `json:"overlay_text"`
-	OverlayBG    string   `json:"overlay_bg"`
-	OverlayStroke string  `json:"overlay_stroke"`
-	TitleColor   string   `json:"title_color"`
-	StrokeColor  string   `json:"stroke_color"`
-	TitleBg      string   `json:"title_bg"`
-	BodyBg       string   `json:"body_bg"`
-	GridIntro    bool     `json:"grid_intro"`
+	Address       string   `json:"address"`
+	Nickname      string   `json:"nickname"`
+	ListingID     string   `json:"listing_id"`
+	Prices        []string `json:"prices"`
+	Amenities     []string `json:"amenities"`
+	EffectType    string   `json:"effect_type"`   // một kiểu cố định hoặc "random"
+	EffectTypes   []string `json:"effect_types"`  // thường 1 phần tử; hoặc ["random"]
+	OverlayStyle  string   `json:"overlay_style"` // "badge" | "bubble"
+	OverlayFont   string   `json:"overlay_font"`
+	OverlayScale  float64  `json:"overlay_scale"`
+	OverlayText   string   `json:"overlay_text"`
+	OverlayBG     string   `json:"overlay_bg"`
+	OverlayStroke string   `json:"overlay_stroke"`
+	TitleColor    string   `json:"title_color"`
+	StrokeColor   string   `json:"stroke_color"`
+	TitleBg       string   `json:"title_bg"`
+	BodyBg        string   `json:"body_bg"`
+	GridIntro     bool     `json:"grid_intro"`
 
 	// Template system (mới)
 	Template     string                              `json:"template"`
@@ -95,8 +96,8 @@ func startWebServer(port int) error {
 
 	mux := http.NewServeMux()
 
-	// CORS middleware
-	handler := corsMiddleware(mux)
+	// Middleware chain: log every request (outermost) → CORS → routes.
+	handler := loggingMiddleware(corsMiddleware(mux))
 
 	// ── API Routes ──
 	mux.HandleFunc("/api/upload", uploadHandler(uploadDir))
@@ -182,6 +183,128 @@ func corsMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// ─── Request Logging Middleware ───────────────────────────────────────────
+
+// ANSI colour helpers for readable terminal output.
+const (
+	cReset  = "\033[0m"
+	cDim    = "\033[2m"
+	cGreen  = "\033[32m"
+	cYellow = "\033[33m"
+	cRed    = "\033[31m"
+	cCyan   = "\033[36m"
+	cBold   = "\033[1m"
+)
+
+// visitorTracker remembers which client IPs we've already seen so the first
+// request from a new visitor can be highlighted ("👤 người dùng mới").
+var visitors = struct {
+	sync.Mutex
+	seen map[string]time.Time
+}{seen: map[string]time.Time{}}
+
+// statusRecorder wraps http.ResponseWriter to capture the status code so the
+// logging middleware can report it after the handler runs.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// clientIP extracts the real client IP, honouring reverse-proxy headers so the
+// log shows the visitor rather than the proxy when deployed behind one.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// First entry is the original client.
+		return strings.TrimSpace(strings.Split(xff, ",")[0])
+	}
+	if xr := r.Header.Get("X-Real-IP"); xr != "" {
+		return strings.TrimSpace(xr)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// statusColor picks a colour by HTTP status class (2xx green, 3xx/4xx yellow, 5xx red).
+func statusColor(code int) string {
+	switch {
+	case code >= 500:
+		return cRed
+	case code >= 300:
+		return cYellow
+	default:
+		return cGreen
+	}
+}
+
+// isNoise reports whether a request is background/asset traffic we don't want
+// cluttering the "who's using the app" log: static assets (js/css/img/fonts),
+// the health check, and the ~1s /api/status render-progress polling. The SPA
+// document itself ("/" or /index.html) is treated as a real page load.
+func isNoise(path string) bool {
+	switch path {
+	case "/api/health", "/api/status",
+		"/api/history", "/api/thumbnail-history":
+		return true // uptime pings + render-progress + 4s history polling
+	case "/", "/index.html":
+		return false // the app page load — a real visit
+	}
+	// Non-API path with a file extension → static asset (index-xxx.js, logo.png…).
+	if !strings.HasPrefix(path, "/api/") {
+		return strings.Contains(filepath.Base(path), ".")
+	}
+	return false
+}
+
+// loggingMiddleware prints one line per request to the terminal so you can see
+// live who is using the app: time, client IP, method, path, status, duration.
+// The first hit from a new IP is called out as a new visitor. Static-asset and
+// polling noise is filtered out; set LOG_VERBOSE=1 to log every request.
+func loggingMiddleware(next http.Handler) http.Handler {
+	verbose := os.Getenv("LOG_VERBOSE") == "1"
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: 200}
+		next.ServeHTTP(rec, r)
+
+		// CORS preflight is handled+returned inside corsMiddleware — pure noise.
+		if r.Method == "OPTIONS" {
+			return
+		}
+		// Skip asset/health/poll noise unless verbose logging is requested.
+		if !verbose && isNoise(r.URL.Path) {
+			return
+		}
+
+		ip := clientIP(r)
+
+		// New-visitor highlight: first time we've seen this IP.
+		visitors.Lock()
+		_, known := visitors.seen[ip]
+		visitors.seen[ip] = start
+		visitors.Unlock()
+		if !known {
+			fmt.Printf("%s%s👤  Người dùng mới đang truy cập: %s%s%s\n",
+				cBold, cCyan, ip, cReset, "")
+		}
+
+		dur := time.Since(start)
+		sc := rec.status
+		fmt.Printf("%s%s%s  %s%s%3d%s  %-6s %s  %s%s%s\n",
+			cDim, start.Format("15:04:05"), cReset,
+			statusColor(sc), cBold, sc, cReset,
+			r.Method, r.URL.Path,
+			cDim, dur.Round(time.Millisecond), cReset)
 	})
 }
 
