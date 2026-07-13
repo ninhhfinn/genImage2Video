@@ -184,27 +184,51 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 	// số frame vào biểu thức).
 	zDelta := 0.08 + cfg.ZoomIntensity*0.15
 	perEffect := make([]effect, n)
+	staticFx := effect{name: "static", z: "1", x: "iw/2-(iw/zoom/2)", y: "ih/2-(ih/zoom/2)"}
 	randomKinds := []string{"zoom-in", "zoom-out", "move-left-right", "move-right-left"}
+
+	// Kiểu chuyển động do motion mode + chips 'Kiểu chuyển động' quyết định:
+	//   slideshow → ảnh tĩnh (chỉ crossfade + giọng đọc + phụ đề)
+	//   kenburns  → theo chip đã chọn (EffectType); "random"/rỗng → tự theo hướng ảnh
+	//   timelapse/khác → coi như kenburns (auto theo hướng ảnh)
+	chosenKind := strings.TrimSpace(cfg.EffectType)
+	if chosenKind == "" && len(cfg.EffectTypes) > 0 {
+		chosenKind = strings.TrimSpace(cfg.EffectTypes[0])
+	}
+	// Chỉ Ken Burns mới honor chip 'Kiểu chuyển động'; slideshow=tĩnh (xử lý riêng
+	// bên dưới), timelapse/khác → auto theo hướng ảnh (chip UI ẩn ở các mode này
+	// nhưng FE vẫn gửi effect_type mặc định, nên phải gate theo mode ở đây).
+	chipFixed := cfg.Mode == "kenburns" && chosenKind != "" && chosenKind != "random" && chosenKind != "mixed"
+
 	for i := 0; i < n; i++ {
+		if cfg.Mode == "slideshow" {
+			perEffect[i] = staticFx
+			continue
+		}
 		all := buildEffects(zDelta, tl.Frames[i])
-		k := randomKinds[rand.Intn(len(randomKinds))]
-		if orient, oerr := imageOrientation(segImages[i]); oerr == nil {
-			switch orient {
-			case "landscape":
-				if rand.Intn(2) == 0 {
-					k = "move-left-right"
-				} else {
-					k = "move-right-left"
-				}
-			case "portrait":
-				if rand.Intn(2) == 0 {
-					k = "zoom-in"
-				} else {
-					k = "zoom-out"
+		var pool []effect
+		if chipFixed {
+			pool = filterEffects(all, chosenKind) // honor chip 'Kiểu chuyển động'
+		} else {
+			k := randomKinds[rand.Intn(len(randomKinds))]
+			if orient, oerr := imageOrientation(segImages[i]); oerr == nil {
+				switch orient {
+				case "landscape":
+					if rand.Intn(2) == 0 {
+						k = "move-left-right"
+					} else {
+						k = "move-right-left"
+					}
+				case "portrait":
+					if rand.Intn(2) == 0 {
+						k = "zoom-in"
+					} else {
+						k = "zoom-out"
+					}
 				}
 			}
+			pool = filterEffects(all, k)
 		}
-		pool := filterEffects(all, k)
 		if len(pool) == 0 {
 			pool = all
 		}

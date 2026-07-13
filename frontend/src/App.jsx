@@ -38,9 +38,10 @@ const DEFAULT_SETTINGS = {
   batchMode: 'both',      // mẻ nhiều listing xuất gì: 'video' | 'thumbnail' | 'both'
   customFont: '',         // font tự tải lên cho tiêu đề (video + thumbnail); '' = theo template
 
-  // ── Thuyết minh AI (mode==='narrated') — giọng đọc AI + nhạc nền ──
+  // ── Thuyết minh AI (cờ độc lập settings.narrate, ghép với motion mode) ──
+  narrate: false,                // bật thuyết minh AI (giọng đọc + phụ đề + nhạc)
   narrationPersona: 'haihuoc',   // 'haihuoc' hài hước | 'lichsu' lịch sự
-  ttsProvider: 'elevenlabs',     // 'elevenlabs' | 'fpt'
+  ttsProvider: 'google',         // 'google' (free, không cần key) | 'elevenlabs' | 'fpt'
   voiceId: '',                   // voice id/name theo provider; '' = giọng mặc định
   maxSegments: 10,               // số cảnh tối đa 3..15
   music: '',                     // tên file nhạc nền từ GET /api/music; '' = không nhạc
@@ -141,9 +142,13 @@ export default function App() {
       if (kind === 'pan-right') kind = 'move-left-right'
       if (kind === 'pan-left') kind = 'move-right-left'
     }
+    // Thuyết minh AI giờ là cờ ĐỘC LẬP, ghép với motion mode. Tương thích ngược
+    // giá trị mode='narrated' cũ (localStorage/client cũ) → narrate + kenburns.
+    const narrate = !!settings.narrate || mode === 'narrated'
+    const motionMode = mode === 'narrated' ? 'kenburns' : (mode || 'kenburns')
     const safeDuration = Math.max(1.5, Number(duration) || 3)
     const cfg = {
-      mode, duration: safeDuration, total: safeDuration, zoom_intensity: zoom, fps: 30, tiktok,
+      mode: motionMode, narrate, duration: safeDuration, total: safeDuration, zoom_intensity: zoom, fps: 30, tiktok,
       width:  tiktok ? 1080 : 1920,
       height: tiktok ? 1920 : 1080,
       title, title_duration: Math.max(0.5, Number(titleDuration) || 3), watermark,
@@ -156,8 +161,8 @@ export default function App() {
       grid_intro: !!gridIntro,
       title_font_file: settings.customFont || '',
     }
-    // Overlay từ listing
-    if (useOverlay && listing) {
+    // Overlay từ listing — LUÔN bật (overlay là lõi app; nút bật/tắt đã bỏ khỏi UI)
+    if (listing) {
       const selectedPriceTypes = Array.isArray(overlayPriceTypes)
         ? new Set(overlayPriceTypes)
         : null
@@ -197,7 +202,7 @@ export default function App() {
       cfg.amenities = manualAmenities.length ? manualAmenities : curateAmenities(listing.amenities || [])
     }
     // Thuyết minh AI: gửi tham số giọng đọc + nhạc nền cho backend TTS pipeline
-    if (settings.mode === 'narrated') {
+    if (narrate) {
       cfg.narration_persona = settings.narrationPersona
       cfg.tts_provider      = settings.ttsProvider
       cfg.voice_id          = settings.voiceId

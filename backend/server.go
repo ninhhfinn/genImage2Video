@@ -79,6 +79,7 @@ type RenderRequest struct {
 	Platforms  []string `json:"platforms"` // ["tiktok","facebook"]
 
 	// Mode "narrated": lời kể AI + giọng đọc TTS + phụ đề + nhạc nền
+	Narrate          bool   `json:"narrate"`
 	NarrationPersona string `json:"narration_persona"`
 	TTSProvider      string `json:"tts_provider"`
 	VoiceID          string `json:"voice_id"`
@@ -453,6 +454,7 @@ func renderHandler(uploadDir, outputDir string) http.HandlerFunc {
 			WebhookURL:    req.WebhookURL,
 			Platforms:     req.Platforms,
 
+			Narrate:          req.Narrate,
 			NarrationPersona: req.NarrationPersona,
 			TTSProvider:      req.TTSProvider,
 			VoiceID:          req.VoiceID,
@@ -461,12 +463,17 @@ func renderHandler(uploadDir, outputDir string) http.HandlerFunc {
 		if cfg.Mode == "" {
 			cfg.Mode = "kenburns"
 		}
+		// Tương thích ngược: mode "narrated" cũ → cờ Narrate + motion mặc định kenburns.
+		if cfg.Mode == "narrated" {
+			cfg.Narrate = true
+			cfg.Mode = "kenburns"
+		}
 		// Nhạc nền: tên file → đường dẫn thật trong music dir (dùng cho ducking).
 		if p := resolveMusicPath(req.Music); p != "" {
 			cfg.Audio = p
 		}
-		// Preflight cho mode narrated: báo lỗi rõ ràng TRƯỚC khi tốn API.
-		if cfg.Mode == "narrated" {
+		// Preflight cho thuyết minh AI: báo lỗi rõ ràng TRƯỚC khi tốn API.
+		if cfg.Narrate {
 			if perr := narratePreflight(cfg); perr != nil {
 				state.mu.Lock()
 				state.err = perr.Error()
@@ -508,15 +515,18 @@ func renderHandler(uploadDir, outputDir string) http.HandlerFunc {
 			}
 
 			var args []string
-			switch cfg.Mode {
-			case "slideshow":
-				args, err = buildSlideshow(cfg, images)
-			case "timelapse":
-				args, err = buildTimelapse(cfg, images)
-			case "narrated":
+			if cfg.Narrate {
+				// Thuyết minh AI ghép lên motion mode đã chọn (buildNarrated tôn trọng cfg.Mode).
 				args, err = buildNarrated(cfg, images)
-			default:
-				args, err = buildKenBurns(cfg, images)
+			} else {
+				switch cfg.Mode {
+				case "slideshow":
+					args, err = buildSlideshow(cfg, images)
+				case "timelapse":
+					args, err = buildTimelapse(cfg, images)
+				default:
+					args, err = buildKenBurns(cfg, images)
+				}
 			}
 			if err != nil {
 				state.mu.Lock()

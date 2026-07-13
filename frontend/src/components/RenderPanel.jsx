@@ -137,6 +137,15 @@ function ProgressBox({ status, text, pct, done, err }) {
         <div className="prog-fill" style={{width:pct+'%',background:err?'var(--red)':'var(--gold)'}}/>
       </div>
       <div className="prog-text">{text||'—'}</div>
+      {err && (
+        <div style={{
+          marginTop:10, padding:'10px 12px', borderRadius:8,
+          background:'rgba(220,60,60,0.10)', border:'1px solid var(--red)',
+          color:'var(--red)', fontSize:12.5, lineHeight:1.55, whiteSpace:'pre-wrap',
+        }}>
+          {err}
+        </div>
+      )}
     </div>
   )
 }

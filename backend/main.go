@@ -74,9 +74,11 @@ type Config struct {
 	WebhookURL string   // URL webhook nhận video + metadata
 	Platforms  []string // ["tiktok","facebook"]
 
-	// Mode "narrated": lời kể AI (Claude Vision) + giọng đọc TTS + phụ đề
+	// Thuyết minh AI: lời kể AI (Claude Vision) + giọng đọc TTS + phụ đề.
+	// Narrate là cờ ĐỘC LẬP — ghép được với mọi motion mode (kenburns/slideshow).
+	Narrate          bool   // bật thuyết minh AI (không còn là 1 giá trị của Mode)
 	NarrationPersona string // "haihuoc" (mặc định) | "lichsu"
-	TTSProvider      string // "elevenlabs" (mặc định) | "fpt"
+	TTSProvider      string // "google" | "elevenlabs" | "fpt"
 	VoiceID          string // voice id/name cho provider; "" → mặc định env
 	MaxSegments      int    // số cảnh tối đa (3–15); 0 → 10
 }
@@ -447,8 +449,9 @@ func parseFlags() Config {
 	flag.BoolVar(&cfg.Tiktok, "tiktok", true, "9:16 cho TikTok/Reels")
 	flag.BoolVar(&cfg.Verbose, "verbose", false, "In lệnh FFmpeg")
 	flag.BoolVar(&cfg.DryRun, "dry-run", false, "Chỉ in lệnh, không chạy")
+	flag.BoolVar(&cfg.Narrate, "narrate", false, "bật thuyết minh AI (ghép với motion mode)")
 	flag.StringVar(&cfg.NarrationPersona, "narration-persona", "haihuoc", "narrated: haihuoc | lichsu")
-	flag.StringVar(&cfg.TTSProvider, "tts-provider", "elevenlabs", "narrated: elevenlabs | fpt")
+	flag.StringVar(&cfg.TTSProvider, "tts-provider", "google", "narrated: google | elevenlabs | fpt")
 	flag.StringVar(&cfg.VoiceID, "voice-id", "", "narrated: voice id/name (bỏ trống = mặc định)")
 	flag.IntVar(&cfg.MaxSegments, "max-segments", 10, "narrated: số cảnh tối đa (3–15)")
 	flag.Usage = printUsage
@@ -508,18 +511,27 @@ func run(cfg Config) error {
 		fmt.Printf("⚠️   Tối thiểu 1.5s/ảnh → tổng %.1fs\n", cfg.Duration*float64(len(images)))
 	}
 
+	// Tương thích ngược: mode "narrated" cũ → cờ Narrate + motion mặc định kenburns.
+	if cfg.Mode == "narrated" {
+		cfg.Narrate = true
+		cfg.Mode = "kenburns"
+	}
+
 	var args []string
-	switch cfg.Mode {
-	case "slideshow":
-		args, err = buildSlideshow(cfg, images)
-	case "kenburns":
-		args, err = buildKenBurns(cfg, images)
-	case "timelapse":
-		args, err = buildTimelapse(cfg, images)
-	case "narrated":
+	if cfg.Narrate {
+		// Thuyết minh AI ghép lên motion mode đã chọn (buildNarrated tôn trọng cfg.Mode).
 		args, err = buildNarrated(cfg, images)
-	default:
-		return fmt.Errorf("mode không hợp lệ: %s", cfg.Mode)
+	} else {
+		switch cfg.Mode {
+		case "slideshow":
+			args, err = buildSlideshow(cfg, images)
+		case "kenburns":
+			args, err = buildKenBurns(cfg, images)
+		case "timelapse":
+			args, err = buildTimelapse(cfg, images)
+		default:
+			return fmt.Errorf("mode không hợp lệ: %s", cfg.Mode)
+		}
 	}
 	if err != nil {
 		return err

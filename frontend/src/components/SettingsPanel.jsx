@@ -60,9 +60,10 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
   const webhookUrl = settings.webhookUrl || ''
   const postTiktok = settings.postTiktok !== false
   const postFacebook = settings.postFacebook !== false
-  // Thuyết minh AI
+  // Thuyết minh AI (cờ độc lập, ghép với motion mode)
+  const narrate = !!settings.narrate
   const narrationPersona = settings.narrationPersona || 'haihuoc'
-  const ttsProvider = settings.ttsProvider || 'elevenlabs'
+  const ttsProvider = settings.ttsProvider || 'google'
   const voiceId = settings.voiceId || ''
   const maxSegments = settings.maxSegments ?? 10
   const perImg = Number(duration) || 3
@@ -131,11 +132,11 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
           onChange={(v) => set('template')(v)}
         />
 
-        {/* Hiệu ứng — gồm nút Thuyết minh AI (narrated) */}
+        {/* Hiệu ứng chuyển động (motion mode) — độc lập với Thuyết minh AI */}
         <div className="field">
           <label className="flabel">Hiệu ứng</label>
           <div className="seg">
-            {[['kenburns','Ken Burns'],['slideshow','Slideshow'],['timelapse','Timelapse'],['narrated','🎙️ Thuyết minh AI']].map(([v,l])=>(
+            {[['kenburns','Ken Burns'],['slideshow','Slideshow'],['timelapse','Timelapse']].map(([v,l])=>(
               <button key={v} className={`seg-btn${mode===v?' on':''}`} onClick={()=>set('mode')(v)}>{l}</button>
             ))}
           </div>
@@ -168,8 +169,16 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
           </div>
         )}
 
-        {/* Thuyết minh AI — chỉ khi mode==='narrated' */}
-        {mode==='narrated' && (
+        {/* Thuyết minh AI — cờ độc lập, ghép được với mọi hiệu ứng ở trên */}
+        <div className="toggle-row">
+          <div className="ti">
+            <div className="t1">🎙️ Thuyết minh AI</div>
+            <div className="t2">Giọng đọc AI + phụ đề (ghép cùng hiệu ứng)</div>
+          </div>
+          <div className={`toggle${narrate?' on':''}`} onClick={()=>set('narrate')(!narrate)}/>
+        </div>
+
+        {narrate && (
           <div className="field">
             <label className="flabel">🎙️ Giọng đọc AI</label>
 
@@ -284,98 +293,46 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
 
       {/* ══ 2. OVERLAY LISTING ══ */}
       <Section title="Overlay listing">
-        <div className="toggle-row">
-          <div className="ti">
-            <div className="t1">Overlay xuyên suốt video</div>
-            <div className="t2">Địa chỉ · Tên · Giá · ID</div>
-          </div>
-          <div className={`toggle${useOverlay?' on':''}`} onClick={()=>set('useOverlay')(!useOverlay)}/>
+        <div className="sect-sub" style={{marginBottom:10}}>
+          Địa chỉ · Tên · Giá · Tiện nghi được ghép lên video theo đúng thiết kế (font/màu) của từng template.
         </div>
 
-        {useOverlay && (
-          <div style={{marginTop:12}}>
-            <div className="field">
-              <label className="flabel">Dòng giá hiển thị</label>
-              <div className="chips">
-                {priceTypeOptions.map(([key, label, source]) => {
-                  const on = overlayPriceTypes.includes(key)
-                  return (
-                    <button
-                      key={key} type="button" title={source}
-                      className={`chip${on?' on':''}`}
-                      onClick={()=>togglePriceType(key)}
-                    >{on ? '✓ ' : ''}{label}</button>
-                  )
-                })}
-              </div>
-              <div className="sect-sub">Bật/tắt từng dòng giá lấy từ API listing (di chuột xem nguồn dữ liệu).</div>
-            </div>
-
-            <div className="field">
-              <label className="flabel">Font chữ listing</label>
-              <div className="seg">
-                {fontOptions.map(([v,l])=>(
-                  <button key={v} className={`seg-btn${overlayFont===v?' on':''}`} onClick={()=>set('overlayFont')(v)}>{l}</button>
-                ))}
-              </div>
-              <div className="font-preview" style={{fontFamily: overlayFont === 'lilita' ? '"Bebas Neue", sans-serif' : 'Georgia, serif'}}>
-                {activePreviewText(settings)}
-              </div>
-              <div className="slider-row" style={{marginTop:8}}>
-                <input type="range" min="0.5" max="1.35" step="0.05" value={overlayScale} onChange={e=>set('overlayScale')(+e.target.value)}/>
-                <span className="slider-val">{Number(overlayScale).toFixed(2)}×</span>
-              </div>
-            </div>
-
-            <div className="color-grid">
-              <label>
-                <span>Màu tiêu đề</span>
-                <input type="color" value={titleColor} onChange={e=>set('titleColor')(e.target.value)}/>
-              </label>
-              <label>
-                <span>Màu nội dung</span>
-                <input type="color" value={overlayText} onChange={e=>set('overlayText')(e.target.value)}/>
-              </label>
-              {template === 'sunset' && (
-                <label>
-                  <span>Màu viền</span>
-                  <input type="color" value={strokeColor} onChange={e=>set('strokeColor')(e.target.value)}/>
-                </label>
-              )}
-              {template !== 'sunset' && (
-                <label>
-                  <span>Nền tiêu đề</span>
-                  <input type="color" value={titleBg || '#6F4A30'} onChange={e=>set('titleBg')(e.target.value)}/>
-                </label>
-              )}
-              <label>
-                <span>Nền nội dung</span>
-                <input type="color" value={bodyBg || (template === 'daiky' ? '#A88B6E' : '#000000')} onChange={e=>set('bodyBg')(e.target.value)}/>
-              </label>
-            </div>
-            <div className="sect-sub">Tách riêng màu chữ & màu nền cho tiêu đề và nội dung. Viền chỉ áp cho Sunset.</div>
-
-            <div className="field" style={{marginTop:10}}>
-              <label className="flabel">Tiện nghi (mỗi dòng 1 mục, hoặc cách bằng " - ")</label>
-              <textarea
-                className="inp body-font textarea"
-                placeholder={`Máy chiếu netflix\nBếp nấu\nCửa sổ thoáng\nGương checkin\nWc khép kín\nGửi xe free`}
-                value={amenitiesText}
-                onChange={e=>set('amenitiesText')(e.target.value)}
-                style={{minHeight:110}}
-              />
-              <div className="sect-sub">Ghi đè amenities từ API. Để trống = dùng giá trị API (nếu có).</div>
-              {apiAmenities.length > 0 && (
-                <div style={{fontSize:11,color:'var(--gold)',marginTop:4,fontWeight:600}}>
-                  ✓ API có {apiAmenities.length} tiện nghi: {apiAmenities.slice(0,6).join(' · ')}{apiAmenities.length > 6 ? '…' : ''}
-                </div>
-              )}
-              {apiAmenities.length === 0 && (
-                <div className="sect-sub">API chưa có amenities — điền tay vào ô trên để hiển thị.</div>
-              )}
-            </div>
+        <div className="field">
+          <label className="flabel">Dòng giá hiển thị</label>
+          <div className="chips">
+            {priceTypeOptions.map(([key, label, source]) => {
+              const on = overlayPriceTypes.includes(key)
+              return (
+                <button
+                  key={key} type="button" title={source}
+                  className={`chip${on?' on':''}`}
+                  onClick={()=>togglePriceType(key)}
+                >{on ? '✓ ' : ''}{label}</button>
+              )
+            })}
           </div>
-        )}
+          <div className="sect-sub">Bật/tắt từng dòng giá lấy từ API listing (di chuột xem nguồn). Dùng chung cho cả thumbnail.</div>
+        </div>
+
+        <div className="field" style={{marginTop:10}}>
+          <label className="flabel">Tiện nghi (mỗi dòng 1 mục, hoặc cách bằng " - ")</label>
+          <textarea
+            className="inp body-font textarea"
+            placeholder={`Máy chiếu netflix\nBếp nấu\nCửa sổ thoáng\nGương checkin\nWc khép kín\nGửi xe free`}
+            value={amenitiesText}
+            onChange={e=>set('amenitiesText')(e.target.value)}
+            style={{minHeight:110}}
+          />
+          <div className="sect-sub">Ghi đè amenities từ API. Để trống = dùng giá trị API (nếu có).</div>
+          {apiAmenities.length > 0 && (
+            <div style={{fontSize:11,color:'var(--gold)',marginTop:4,fontWeight:600}}>
+              ✓ API có {apiAmenities.length} tiện nghi: {apiAmenities.slice(0,6).join(' · ')}{apiAmenities.length > 6 ? '…' : ''}
+            </div>
+          )}
+          {apiAmenities.length === 0 && (
+            <div className="sect-sub">API chưa có amenities — điền tay vào ô trên để hiển thị.</div>
+          )}
+        </div>
       </Section>
 
       {/* ══ 3. TIÊU ĐỀ & CHỮ ══ */}
@@ -592,10 +549,9 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
             ['Tổng dự kiến', uploadedCount>0 ? totalTime+'s' : '—'],
             ['Tiêu đề', title ? titleSecs+'s' : 'Tắt'],
             ['Định dạng', tiktok?'1080×1920':'1920×1080'],
-            ['Overlay', useOverlay?'Bật':'Tắt'],
+            ['Thuyết minh AI', narrate ? '🎙️ Bật' : 'Tắt'],
             ['Template', template],
-            ['Font listing', useOverlay ? (overlayFont==='lilita'?'Lilita One':'Playfair') : '—'],
-            ['Danh mục giá', useOverlay ? `${overlayPriceTypes.length}/${priceTypeOptions.length}` : '—'],
+            ['Danh mục giá', `${overlayPriceTypes.length}/${priceTypeOptions.length}`],
           ].map(([k,v])=>(
             <div key={k} className="summary-row">
               <span className="k">{k}</span>
