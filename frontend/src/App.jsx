@@ -42,6 +42,8 @@ const DEFAULT_SETTINGS = {
   // ── Thuyết minh AI (cờ độc lập settings.narrate, ghép với motion mode) ──
   narrate: false,                // bật thuyết minh AI (giọng đọc + phụ đề + nhạc)
   narrationPersona: 'haihuoc',   // 'haihuoc' hài hước | 'lichsu' lịch sự
+  introClip: true,               // chèn cảnh đi đường mở đầu (hook đọc trên video quay thật)
+  audience: 'couple',            // tệp khán giả: 'couple' (các vợ) | 'genz' (các em)
   subtitleStyle: 'karaoke',      // kiểu phụ đề: 'karaoke' | 'typewriter'
   ttsProvider: 'google',         // 'google' (free, không cần key) | 'elevenlabs' | 'fpt'
   voiceId: '',                   // voice id/name theo provider; '' = giọng mặc định
@@ -127,6 +129,7 @@ export default function App() {
   useEffect(() => { setApprovedScript(null) }, [
     activeListing?.id, uploadedCount, settings.narrationPersona,
     settings.maxSegments, settings.targetDuration, settings.ttsProvider,
+    settings.introClip, settings.audience,
     JSON.stringify(settings.overlayPriceTypes), settings.amenitiesText,
   ])
 
@@ -228,6 +231,11 @@ export default function App() {
       cfg.target_duration   = Number(settings.targetDuration ?? 60) || 0
       cfg.music             = settings.music
       cfg.subtitle_style    = settings.subtitleStyle || 'karaoke'
+      // Intro + tệp khán giả chỉ áp dụng persona hài hước (kênh Dayladau); lịch
+      // sự không có intro (khớp gate backend introEnabled) — tránh video lịch sự
+      // bị ép cảnh đi đường + hụt thời lượng.
+      cfg.intro_clip        = settings.narrationPersona === 'haihuoc' ? (settings.introClip ?? true) : false
+      cfg.audience          = settings.audience || 'couple'
       // Kịch bản đã duyệt/sửa từ ScriptPanel — chỉ render lẻ (batch mỗi listing
       // một kịch bản riêng nên không dùng chung được).
       if (!batch && approvedScript) cfg.script = approvedScript
@@ -262,6 +270,8 @@ export default function App() {
       listing_id:        c.listing_id || '',
       prices:            c.prices     || [],
       amenities:         c.amenities  || [],
+      intro_clip:        c.intro_clip ?? false,
+      audience:          c.audience   || settings.audience || 'couple',
     }
   }, [buildRenderCfg, activeListing, settings])
 
@@ -576,6 +586,14 @@ export default function App() {
           <div className="pbody pbody-flush">
             {settings.narrate && !isQueueMode && (
               <ScriptPanel
+                // Remount khi đổi listing/cấu hình kịch bản → xoá bản đang hiển
+                // thị, tránh bấm "Dùng bản này" trên kịch bản của listing cũ.
+                key={[
+                  activeListing?.id || 'up', uploadedCount,
+                  settings.narrationPersona, settings.introClip, settings.audience,
+                  settings.targetDuration, settings.maxSegments, settings.ttsProvider,
+                  JSON.stringify(settings.overlayPriceTypes),
+                ].join('·')}
                 buildScriptReq={buildScriptReq}
                 canFetch={uploadedCount > 0}
                 approvedScript={approvedScript}

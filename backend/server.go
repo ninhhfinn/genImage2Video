@@ -87,6 +87,8 @@ type RenderRequest struct {
 	TargetDuration   int    `json:"target_duration"` // giây; 0 = không giới hạn
 	SubtitleStyle    string `json:"subtitle_style"`  // "karaoke" (mặc định) | "typewriter"
 	Music            string `json:"music"`           // tên file nhạc trong music dir; "" = không nhạc
+	IntroClip        bool   `json:"intro_clip"`      // chèn cảnh đi đường mở đầu (assets/intro/street.mp4)
+	Audience         string `json:"audience"`        // "couple" (mặc định) | "genz"
 
 	// Kịch bản user đã duyệt/sửa từ panel "Xem kịch bản" (nil = Claude tự viết).
 	Script *NarrationScript `json:"script,omitempty"`
@@ -475,6 +477,8 @@ func renderHandler(uploadDir, outputDir string) http.HandlerFunc {
 			MaxSegments:      req.MaxSegments,
 			TargetDuration:   req.TargetDuration,
 			SubtitleStyle:    req.SubtitleStyle,
+			IntroClip:        req.IntroClip,
+			Audience:         req.Audience,
 			Script:           req.Script,
 		}
 		if cfg.Mode == "" {
@@ -573,7 +577,9 @@ type ScriptRequest struct {
 	ListingID        string   `json:"listing_id"`
 	Prices           []string `json:"prices"`
 	Amenities        []string `json:"amenities"`
-	Force            bool     `json:"force"` // true = nút "Viết lại": bỏ qua cache
+	IntroClip        bool     `json:"intro_clip"` // chèn cảnh đi đường (đổi ngân sách + schema kịch bản)
+	Audience         string   `json:"audience"`   // "couple" (mặc định) | "genz"
+	Force            bool     `json:"force"`      // true = nút "Viết lại": bỏ qua cache
 }
 
 // scriptPreviewHandler sinh kịch bản cho panel "Xem kịch bản". Dùng đúng
@@ -610,6 +616,8 @@ func scriptPreviewHandler(uploadDir string) http.HandlerFunc {
 			ListingID:        req.ListingID,
 			Prices:           req.Prices,
 			Amenities:        req.Amenities,
+			IntroClip:        req.IntroClip,
+			Audience:         req.Audience,
 			ForceScript:      req.Force,
 		}
 		images = capNarratedImages(cfg, images)
@@ -619,19 +627,28 @@ func scriptPreviewHandler(uploadDir string) http.HandlerFunc {
 			writeJSONErr(w, 500, err.Error())
 			return
 		}
-		_, wordBudget := narrationBudget(float64(cfg.TargetDuration), len(images), cfg.TTSProvider)
+		_, wordBudget := narrationBudget(narrTargetSec(cfg), len(images), cfg.TTSProvider)
 		// Grounding: cảnh báo ngay trên panel nếu giá trong hook lệch dữ liệu.
 		hookWarning := ""
 		if tok, bad := hookPriceMismatch(script.HookLine1+" "+script.HookLine2, req.Prices); bad {
 			hookWarning = fmt.Sprintf("Giá %q trong hook không khớp dữ liệu giá listing — sửa lại trước khi render", tok)
 		}
+		// Cảnh báo từ cấm (tone clean SPEC §1.1 + ngôn ngữ quảng cáo §3.5) — soft.
+		var warnings []string
+		if hits := scriptBannedHits(script); len(hits) > 0 {
+			warnings = append(warnings, "Kịch bản chứa từ nên tránh: "+strings.Join(hits, ", "))
+		}
 		json.NewEncoder(w).Encode(map[string]any{
-			"segments":      script.Segments,
-			"hook_line1":    script.HookLine1,
-			"hook_line2":    script.HookLine2,
-			"hook_emphasis": script.HookEmphasis,
-			"hook_warning":  hookWarning,
-			"word_budget":   wordBudget,
+			"segments":        script.Segments,
+			"hook_line1":      script.HookLine1,
+			"hook_line2":      script.HookLine2,
+			"hook_emphasis":   script.HookEmphasis,
+			"intro_narration": script.IntroNarration,
+			"intro_caption":   script.IntroCaption,
+			"intro_enabled":   introEnabled(cfg),
+			"hook_warning":    hookWarning,
+			"warnings":        warnings,
+			"word_budget":     wordBudget,
 		})
 	}
 }

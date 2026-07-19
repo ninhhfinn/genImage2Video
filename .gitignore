@@ -38,3 +38,7 @@ Thumbs.db
 
 # ── Khoá API local (không commit) ──
 .secrets.env
+
+# ── Thư viện asset upload từ web (dữ liệu server-local, không commit) ──
+backend/assets/intro/
+backend/assets/music/

@@ -34,17 +34,18 @@ var scriptLibMu sync.Mutex
 
 // ScriptEntry = một kịch bản đã dùng render, lưu làm thư viện/feedback.
 type ScriptEntry struct {
-	ID           string             `json:"id"`
-	ListingID    string             `json:"listing_id"`
-	Nickname     string             `json:"nickname"`
-	Persona      string             `json:"persona"`
-	Segments     []NarrationSegment `json:"segments"`
-	HookLine1    string             `json:"hook_line1,omitempty"`
-	HookLine2    string             `json:"hook_line2,omitempty"`
-	HookEmphasis string             `json:"hook_emphasis,omitempty"`
-	Edited       bool               `json:"edited"`
-	Liked        bool               `json:"liked"`
-	CreatedAt    string             `json:"created_at"`
+	ID             string             `json:"id"`
+	ListingID      string             `json:"listing_id"`
+	Nickname       string             `json:"nickname"`
+	Persona        string             `json:"persona"`
+	Segments       []NarrationSegment `json:"segments"`
+	HookLine1      string             `json:"hook_line1,omitempty"`
+	HookLine2      string             `json:"hook_line2,omitempty"`
+	HookEmphasis   string             `json:"hook_emphasis,omitempty"`
+	IntroNarration string             `json:"intro_narration,omitempty"` // lời hook cảnh đi đường (v6)
+	Edited         bool               `json:"edited"`
+	Liked          bool               `json:"liked"`
+	CreatedAt      string             `json:"created_at"`
 }
 
 func scriptLibPath() string {
@@ -125,16 +126,17 @@ func saveScriptEntry(cfg Config, s *NarrationScript, edited bool) {
 		}
 	}
 	entries = append([]ScriptEntry{{
-		ID:           id,
-		ListingID:    cfg.ListingID,
-		Nickname:     cfg.Nickname,
-		Persona:      normalizePersona(cfg.NarrationPersona),
-		Segments:     s.Segments,
-		HookLine1:    s.HookLine1,
-		HookLine2:    s.HookLine2,
-		HookEmphasis: s.HookEmphasis,
-		Edited:       edited,
-		CreatedAt:    time.Now().Format(time.RFC3339),
+		ID:             id,
+		ListingID:      cfg.ListingID,
+		Nickname:       cfg.Nickname,
+		Persona:        normalizePersona(cfg.NarrationPersona),
+		Segments:       s.Segments,
+		HookLine1:      s.HookLine1,
+		HookLine2:      s.HookLine2,
+		HookEmphasis:   s.HookEmphasis,
+		IntroNarration: s.IntroNarration,
+		Edited:         edited,
+		CreatedAt:      time.Now().Format(time.RFC3339),
 	}}, entries...)
 
 	// Trần thư viện: bỏ bản CŨ NHẤT chưa liked trước.
@@ -200,7 +202,7 @@ func likedScriptExamples(persona string, max int) []string {
 			s.ImageIndex = i
 			compact[i] = s
 		}
-		data, err := json.Marshal(NarrationScript{Segments: compact})
+		data, err := json.Marshal(NarrationScript{Segments: compact, IntroNarration: e.IntroNarration})
 		if err != nil {
 			continue
 		}

@@ -1,5 +1,50 @@
 [
   {
+    "id": "c2fdb7eeee4e1dc8",
+    "listing_id": "ls139dv18q",
+    "nickname": "TC 303",
+    "persona": "haihuoc",
+    "segments": [
+      {
+        "image_index": 0,
+        "caption": "Vào phòng",
+        "narration": "Book xong hướng dẫn vào phòng gửi thẳng về máy, đến nơi khỏi gặp ai, riêng tư khỏi bàn. Một trăm chín mươi chín nghìn hai tiếng đầu mà phòng galaxy lung linh thế này, mở cửa ra là mê luôn."
+      },
+      {
+        "image_index": 1,
+        "caption": "Góc sống ảo",
+        "narration": "Anh cũng chả tin giá đó cho tới lúc thấy góc này, gương to đùng sống ảo, decor xinh khỏi chê."
+      },
+      {
+        "image_index": 2,
+        "caption": "Máy chiếu",
+        "narration": "Máy chiếu nét căng lắm nha, tắt đèn cái là thành rạp phim riêng hai đứa. Ai rủ về mới lạ."
+      },
+      {
+        "image_index": 3,
+        "caption": "Đèn galaxy",
+        "narration": "Đèn galaxy đổ khắp phòng như trong phim, nằm dài chill thôi cũng thấy sang."
+      },
+      {
+        "image_index": 4,
+        "caption": "Bếp nấu ăn",
+        "narration": "Có cả bếp nhỏ với bồn rửa, nấu cho nhau ăn khỏi tốn tiền đi hàng."
+      },
+      {
+        "image_index": 5,
+        "caption": "Chốt căn",
+        "narration": "Xịn nhất là đặt theo giờ trên app Đây Là Đâu, đi mấy tiếng trả tiền mấy tiếng, khỏi ôm nguyên đêm. Cặp nào muốn cuối tuần đổi gió riêng tư thì căn TC ba lẻ ba này hợp lý luôn."
+      }
+    ],
+    "hook_line1": "TC 303 galaxy sống ảo",
+    "hook_line2": "Chỉ 199k/2 giờ",
+    "hook_emphasis": "199k/2 giờ",
+    "intro_narration": "Anh cứ tưởng phòng rẻ toàn tối om chả tí riêng tư. Nay anh soi tận nơi cho các vợ.",
+    "edited": false,
+    "liked": false,
+    "created_at": "2026-07-19T23:10:58+07:00"
+  },
+  {
     "id": "ab3ebf12cc2c7133",
     "listing_id": "ls3ulxdo7n",
     "nickname": "Chiru TL - 402",

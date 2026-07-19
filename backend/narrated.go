@@ -17,7 +17,51 @@ const (
 	narratedPad   = 1.6 // đệm mỗi cảnh: 0.8 dẫn + 0.8 đuôi (≥ 2·cross + 0.2)
 
 	narratedMinWords = 13 // đoạn ngắn hơn thế thì cụt, hết hài
+
+	// introOverheadSec: thời lượng cảnh đi đường ăn vào ngân sách khi bật intro
+	// (~6s giọng hook + 1.1s overhead cảnh). Trừ khỏi TargetDuration để các cảnh
+	// phòng không bị đội tổng thời lượng.
+	introOverheadSec = 7.0
 )
+
+// introAssetOverride: test seam — trỏ clip intro sang file tạm trong test.
+var introAssetOverride string
+
+// introAssetPath trả về đường dẫn clip cảnh đi đường (assets/intro/street.mp4)
+// hoặc "" nếu chưa có file (giống stickerAssetPath → thiếu asset thì bỏ qua êm).
+func introAssetPath() string {
+	if introAssetOverride != "" {
+		return introAssetOverride
+	}
+	p := filepath.Join(assetsDir(), "intro", "street.mp4")
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
+}
+
+// introEnabled: có chèn cảnh đi đường mở đầu không. Chỉ áp dụng cho persona
+// haihuoc (kênh Dayladau theo SPEC) — persona "lịch sự" KHÔNG có intro dù FE lỡ
+// gửi cờ (prompt lichsu không sinh intro_narration, giọng/khung không hợp).
+// Gate ở đây là NGUỒN CHÂN LÝ: narrTargetSec, schema, template CLI, cache key,
+// buildNarrated đều đọc introEnabled nên tự nhất quán.
+func introEnabled(cfg Config) bool {
+	return cfg.Narrate && cfg.IntroClip && !isLichsu(cfg.NarrationPersona) && introAssetPath() != ""
+}
+
+// narrTargetSec: thời lượng mục tiêu dành CHO CÁC CẢNH PHÒNG. Khi bật intro,
+// trừ đi phần cảnh đi đường (introOverheadSec) để tổng video không vượt mục
+// tiêu; sàn 15s để vẫn còn chỗ cho tối thiểu vài cảnh. TargetDuration ≤ 0 →
+// 0 (không giới hạn).
+func narrTargetSec(cfg Config) float64 {
+	t := float64(cfg.TargetDuration)
+	if t > 0 && introEnabled(cfg) {
+		if t -= introOverheadSec; t < 15 {
+			t = 15
+		}
+	}
+	return t
+}
 
 // narrationRate = tốc độ đọc thực tế (từ/giây) theo TTS provider.
 // google ĐO THẬT 2026-07-14: ~2.2-2.4 từ/s (render 8 cảnh ra 57.3s ✓).
@@ -205,7 +249,7 @@ func capNarratedImages(cfg Config, images []string) []string {
 	if maxSeg > 20 {
 		maxSeg = 20
 	}
-	if effN, _ := narrationBudget(float64(cfg.TargetDuration), maxSeg, cfg.TTSProvider); effN < maxSeg {
+	if effN, _ := narrationBudget(narrTargetSec(cfg), maxSeg, cfg.TTSProvider); effN < maxSeg {
 		reportProgress(fmt.Sprintf("⏱️ Giảm còn %d cảnh cho vừa ~%ds", effN, cfg.TargetDuration))
 		maxSeg = effN
 	}
@@ -269,14 +313,54 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 			float64(totalWords)/totalVoice, totalWords, totalVoice, cfg.TTSProvider)
 	}
 
-	// 3) Timeline đồng bộ.
-	tl := computeNarratedTimeline(voiceDur, narratedCross, narratedPad, cfg.FPS)
+	// QA soft: cảnh báo từ cấm (không chặn render — user sửa được ở panel).
+	if hits := scriptBannedHits(script); len(hits) > 0 {
+		reportProgress("⚠️ Kịch bản chứa từ nên tránh: " + strings.Join(hits, ", "))
+	}
+
+	// 2b) Cảnh đi đường mở đầu (intro): TTS lời hook rồi ghép thành "cảnh 0".
+	// off=1 khi có intro; sceneVoiceDur/scenePaths/renderScript được prepend
+	// ĐỒNG BỘ (timeline, giọng, phụ đề đều index theo cùng thứ tự cảnh) — lệch
+	// một mảng là karaoke trật cảnh. renderScript CHỈ dùng cho ASS/timeline;
+	// segImages (map từ script gốc) không đổi vì cảnh 0 dùng clip video, không
+	// phải ảnh (pseudo-segment mang ImageIndex=-1, không bao giờ tra vào ảnh).
+	off := 0
+	introPath := ""
+	sceneVoiceDur, scenePaths, renderScript := voiceDur, voicePaths, script
+	if introEnabled(cfg) {
+		if strings.TrimSpace(script.IntroNarration) == "" {
+			reportProgress("⚠️ Kịch bản không có lời hook cho cảnh đi đường — render KHÔNG có intro")
+		} else if introVoicePaths, introVoiceDur, ierr := synthSegments(cfg,
+			&NarrationScript{Segments: []NarrationSegment{{Narration: script.IntroNarration}}}); ierr != nil || len(introVoiceDur) == 0 {
+			// Intro là tuỳ chọn — TTS hook lỗi thì BỎ intro, KHÔNG chết cả render.
+			reportProgress("⚠️ Không lồng được giọng cho cảnh đi đường — render KHÔNG có intro")
+			fmt.Fprintf(os.Stderr, "⚠️  intro TTS lỗi (bỏ intro): %v\n", ierr)
+		} else {
+			off = 1
+			introPath = introAssetPath()
+			sceneVoiceDur = append([]float64{introVoiceDur[0]}, voiceDur...)
+			scenePaths = append([]string{introVoicePaths[0]}, voicePaths...)
+			renderScript = &NarrationScript{
+				HookLine1:    script.HookLine1,
+				HookLine2:    script.HookLine2,
+				HookEmphasis: script.HookEmphasis,
+				Segments: append([]NarrationSegment{{
+					ImageIndex: -1, Caption: script.IntroCaption, Narration: script.IntroNarration,
+				}}, script.Segments...),
+			}
+			reportProgress("🎬 Chèn cảnh đi đường mở đầu (hook đọc trên video)")
+		}
+	}
+
+	// 3) Timeline đồng bộ (tính trên toàn bộ cảnh, kể cả intro).
+	tl := computeNarratedTimeline(sceneVoiceDur, narratedCross, narratedPad, cfg.FPS)
+	scenes := n + off
 
 	if cfg.TargetDuration > 0 && tl.Total > float64(cfg.TargetDuration)*1.2 {
 		fmt.Fprintf(os.Stderr, "⚠️  Video %.1fs vượt mục tiêu %ds (lời kể dài hơn dự kiến)\n", tl.Total, cfg.TargetDuration)
 	}
 
-	reportProgress(fmt.Sprintf("🎬 Dựng video %d cảnh · %.1fs", n, tl.Total))
+	reportProgress(fmt.Sprintf("🎬 Dựng video %d cảnh · %.1fs", scenes, tl.Total))
 
 	// Hiệu ứng Ken Burns cho từng cảnh (theo hướng ảnh, per-clip vì zoompan nhúng
 	// số frame vào biểu thức).
@@ -303,7 +387,7 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 			perEffect[i] = staticFx
 			continue
 		}
-		all := buildEffects(zDelta, tl.Frames[i])
+		all := buildEffects(zDelta, tl.Frames[i+off]) // cảnh ảnh i nằm ở vị trí i+off (sau intro)
 		var pool []effect
 		if chipFixed {
 			pool = filterEffects(all, chosenKind) // honor chip 'Kiểu chuyển động'
@@ -350,7 +434,7 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 		return nil, err
 	}
 	hookEnd := tl.Total
-	if n > 1 {
+	if scenes > 1 {
 		hookEnd = tl.Offsets[1]
 	}
 	hookL1, hookL2, hookEmph := script.HookLine1, script.HookLine2, script.HookEmphasis
@@ -374,10 +458,10 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 	seedH.Write([]byte(cfg.ListingID))
 	assPath, fontsDir, err := writeNarratedASS(narratedSubtitleSpec{
 		Style:      subtitleStyle,
-		Script:     script,
+		Script:     renderScript, // gồm pseudo-segment intro (nếu có) → phụ đề cảnh 0 = hook
 		Timeline:   tl,
-		VoiceDur:   voiceDur,
-		VoicePaths: voicePaths,
+		VoiceDur:   sceneVoiceDur,
+		VoicePaths: scenePaths,
 		Accent:     accentForTemplate(cfg.Template),
 		HookEnd:    hookEnd,
 		HookLine1:  hookL1,
@@ -391,10 +475,19 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 		return nil, fmt.Errorf("sinh phụ đề ASS: %v", err)
 	}
 
-	// ── Inputs: ảnh, watermark PNG, sticker, khói, giọng mp3, (nhạc) ──
+	// ── Inputs: (intro), ảnh, watermark PNG, sticker, khói, giọng mp3, (nhạc) ──
+	// Intro là input index 0 → mọi ảnh + overlay + giọng dồn thêm off. Các mốc
+	// index (templateFirstIdx, stkIdx, smkIdx, voiceFirstIdx, musicIdx) đều tính
+	// theo `scenes` (= n+off), KHÔNG theo n.
 	var args []string
+	if off == 1 {
+		// Clip cảnh đi đường: -t đủ dài cho cảnh 0 (+0.3 dư để tpad clone khỏi
+		// hụt frame ở biên xfade); KHÔNG -loop (cờ đó chỉ dành cho ảnh tĩnh).
+		need := float64(tl.Frames[0]) / float64(cfg.FPS)
+		args = append(args, "-t", fmt.Sprintf("%.3f", need+0.3), "-i", introPath)
+	}
 	for i := 0; i < n; i++ {
-		t := tl.ClipDur[i] + tl.Cross + 0.2
+		t := tl.ClipDur[i+off] + tl.Cross + 0.2
 		args = append(args, "-loop", "1", "-t", fmt.Sprintf("%.3f", t), "-i", segImages[i])
 	}
 
@@ -402,12 +495,12 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 	if wm, werr := renderWatermarkPlan(cfg, subsTmp); werr == nil && wm != nil {
 		overlayPlans = append(overlayPlans, *wm)
 	}
-	templateFirstIdx := n
+	templateFirstIdx := scenes
 	for _, p := range overlayPlans {
 		args = append(args, "-i", p.PNGPath)
 	}
 
-	nextIdx := n + len(overlayPlans)
+	nextIdx := scenes + len(overlayPlans)
 	stkIdx, smkIdx := -1, -1
 	if stickerPath != "" {
 		stkIdx = nextIdx
@@ -420,17 +513,17 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 		args = append(args, "-i", smokePath)
 	}
 
-	// Giọng đọc mp3.
+	// Giọng đọc mp3 (gồm giọng hook của intro ở cảnh 0 nếu có).
 	voiceFirstIdx := nextIdx
-	for i := 0; i < n; i++ {
-		args = append(args, "-i", voicePaths[i])
+	for i := 0; i < scenes; i++ {
+		args = append(args, "-i", scenePaths[i])
 	}
 
 	// Nhạc nền (tuỳ chọn).
 	musicIdx := -1
 	if cfg.Audio != "" {
 		if _, serr := os.Stat(cfg.Audio); serr == nil {
-			musicIdx = voiceFirstIdx + n
+			musicIdx = voiceFirstIdx + scenes
 			args = append(args, "-i", cfg.Audio)
 		} else {
 			fmt.Fprintf(os.Stderr, "⚠️  Không thấy nhạc: %s\n", cfg.Audio)
@@ -439,22 +532,33 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 
 	// ── Filtergraph video ──
 	var fc strings.Builder
+	if off == 1 {
+		// Cảnh 0 = clip đi đường: scale/crop 9:16 + ĐỒNG BỘ fps/sar/timebase với
+		// nhánh zoompan (xfade đòi cả 4 thứ này khớp, thiếu là "links do not
+		// match"); tpad clone frame cuối nếu clip ngắn hơn cảnh, trim đúng độ dài.
+		// KHÔNG zoompan (đó là hiệu ứng Ken Burns cho ảnh tĩnh, không cho video).
+		need := float64(tl.Frames[0]) / float64(cfg.FPS)
+		fc.WriteString(fmt.Sprintf(
+			"[0:v]%s,fps=%d,setsar=1,settb=1/%d,tpad=stop_mode=clone:stop_duration=%.3f,trim=duration=%.3f,setpts=PTS-STARTPTS[zp0];\n",
+			scaleCrop(cfg.Width, cfg.Height), cfg.FPS, cfg.FPS, need, need))
+	}
 	for i := 0; i < n; i++ {
+		s := i + off // vị trí cảnh (cũng là input index vì intro chiếm input 0)
 		ef := perEffect[i]
 		fc.WriteString(fmt.Sprintf(
 			"[%d:v]%s,zoompan=z='%s':x='%s':y='%s':d=%d:s=%dx%d:fps=%d[zp%d];\n",
-			i, scaleCrop(cfg.Width, cfg.Height),
+			s, scaleCrop(cfg.Width, cfg.Height),
 			ef.z, ef.x, ef.y,
-			tl.Frames[i], cfg.Width, cfg.Height, cfg.FPS, i,
+			tl.Frames[s], cfg.Width, cfg.Height, cfg.FPS, s,
 		))
 	}
-	if n == 1 {
+	if scenes == 1 {
 		fc.WriteString("[zp0]copy[vout]")
 	} else {
 		prev := "zp0"
-		for i := 1; i < n; i++ {
+		for i := 1; i < scenes; i++ {
 			out := fmt.Sprintf("xf%d", i)
-			if i == n-1 {
+			if i == scenes-1 {
 				out = "vout"
 			}
 			fc.WriteString(fmt.Sprintf(
@@ -497,7 +601,7 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 	// ── Filtergraph audio ──
 	filterStr += fmt.Sprintf(";\nanullsrc=r=44100:cl=stereo,atrim=duration=%.3f[abase]", tl.Total)
 	voiceLabels := []string{"[abase]"}
-	for i := 0; i < n; i++ {
+	for i := 0; i < scenes; i++ {
 		delayMs := int(tl.VoiceAt[i] * 1000)
 		lbl := fmt.Sprintf("[d%d]", i)
 		filterStr += fmt.Sprintf(";\n[%d:a]aformat=sample_rates=44100:channel_layouts=stereo,adelay=%d|%d%s",

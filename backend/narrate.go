@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/disintegration/imaging"
@@ -44,6 +46,11 @@ type NarrationScript struct {
 	HookLine1    string             `json:"hook_line1,omitempty"`    // dòng 1: tên căn/khu vực (≤~26 ký tự)
 	HookLine2    string             `json:"hook_line2,omitempty"`    // dòng 2: giá mồi (≤~26 ký tự)
 	HookEmphasis string             `json:"hook_emphasis,omitempty"` // cụm nhấn màu, nằm NGUYÊN VĂN trong 1 dòng
+	// Lời hook ĐỌC TRÊN cảnh đi đường mở đầu (v6, khi bật intro). Đây là lời kể
+	// (đọc thành tiếng) → viết số thành CHỮ như narration. IntroCaption = nhãn
+	// 2–4 từ tuỳ chọn (không burn vào video, chỉ để panel/thư viện hiển thị).
+	IntroNarration string `json:"intro_narration,omitempty"`
+	IntroCaption   string `json:"intro_caption,omitempty"`
 }
 
 // genScript là test seam — test có thể gán stub để chạy không cần API key.
@@ -53,7 +60,7 @@ var genScript = generateNarrationScript
 // panel FE (cfg.Script), không có thì gọi Claude (genScript, có cache).
 func scriptForConfig(cfg Config, images []string) (*NarrationScript, error) {
 	if cfg.Script != nil {
-		_, wordBudget := narrationBudget(float64(cfg.TargetDuration), len(images), cfg.TTSProvider)
+		_, wordBudget := narrationBudget(narrTargetSec(cfg), len(images), cfg.TTSProvider)
 		s := validateScript(cfg.Script, len(images), wordBudget, cfg.Nickname)
 		if len(s.Segments) == 0 {
 			return nil, fmt.Errorf("kịch bản gửi lên không có cảnh hợp lệ (image_index phải trong 0..%d)", len(images)-1)
@@ -112,7 +119,7 @@ func generateNarrationScript(cfg Config, images []string) (*NarrationScript, err
 		}
 	}
 
-	_, wordBudget := narrationBudget(float64(cfg.TargetDuration), len(images), cfg.TTSProvider)
+	_, wordBudget := narrationBudget(narrTargetSec(cfg), len(images), cfg.TTSProvider)
 	script = validateScript(script, len(images), wordBudget, cfg.Nickname)
 	if len(script.Segments) == 0 {
 		return nil, fmt.Errorf("Claude không trả về cảnh nào hợp lệ")
@@ -137,7 +144,7 @@ func claudeCLIAvailable() bool {
 // prompt-injection: listing từ Dayladau là nội dung không tin cậy).
 func claudeCodeScript(cfg Config, images []string) (*NarrationScript, error) {
 	workDir := filepath.Dir(images[0])
-	_, wordBudget := narrationBudget(float64(cfg.TargetDuration), len(images), cfg.TTSProvider)
+	_, wordBudget := narrationBudget(narrTargetSec(cfg), len(images), cfg.TTSProvider)
 
 	var b strings.Builder
 	b.WriteString(narrationFullSystemPrompt(cfg, wordBudget))
@@ -152,7 +159,11 @@ func claudeCodeScript(cfg Config, images []string) (*NarrationScript, error) {
 	b.WriteString(narrationUserContext(cfg, len(images), wordBudget))
 	b.WriteString("\n===== HẾT DỮ LIỆU PHÒNG =====\n")
 	b.WriteString("\nCHỈ in DUY NHẤT một object JSON đúng schema sau, KHÔNG markdown, KHÔNG giải thích:\n")
-	b.WriteString(`{"segments":[{"image_index":<int>,"caption":"<2-4 từ>","narration":"<lời kể>"}],"hook_line1":"<tên căn, ≤26 ký tự>","hook_line2":"<giá mồi, ≤26 ký tự>","hook_emphasis":"<cụm nhấn nằm nguyên văn trong 1 dòng>"}`)
+	introField := ""
+	if introEnabled(cfg) {
+		introField = `,"intro_narration":"<1-2 câu hook đọc trên cảnh đi đường>","intro_caption":"<2-4 từ>"`
+	}
+	b.WriteString(`{"segments":[{"image_index":<int>,"caption":"<2-4 từ>","narration":"<lời kể>"}],"hook_line1":"<tên căn, ≤26 ký tự>","hook_line2":"<giá mồi, ≤26 ký tự>","hook_emphasis":"<cụm nhấn nằm nguyên văn trong 1 dòng>"` + introField + `}`)
 	b.WriteString(fmt.Sprintf("\nĐúng %d phần tử, image_index từ 0 đến %d theo thứ tự.\n", len(images), len(images)-1))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
@@ -197,7 +208,7 @@ func claudeCodeScript(cfg Config, images []string) (*NarrationScript, error) {
 
 func anthropicAPIScript(cfg Config, images []string) (*NarrationScript, error) {
 	client := anthropic.NewClient() // đọc ANTHROPIC_API_KEY từ env
-	_, wordBudget := narrationBudget(float64(cfg.TargetDuration), len(images), cfg.TTSProvider)
+	_, wordBudget := narrationBudget(narrTargetSec(cfg), len(images), cfg.TTSProvider)
 
 	blocks := []anthropic.ContentBlockParamUnion{
 		anthropic.NewTextBlock("Các ảnh phòng (theo thứ tự index 0 trở đi):"),
@@ -225,7 +236,7 @@ func anthropicAPIScript(cfg Config, images []string) (*NarrationScript, error) {
 		},
 		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(blocks...)},
 		OutputConfig: anthropic.OutputConfigParam{
-			Format: anthropic.JSONOutputFormatParam{Schema: narrationSchema()},
+			Format: anthropic.JSONOutputFormatParam{Schema: narrationSchema(introEnabled(cfg))},
 		},
 	})
 	if err != nil {
@@ -251,28 +262,40 @@ func anthropicAPIScript(cfg Config, images []string) (*NarrationScript, error) {
 
 // narrationPromptVersion nằm trong scriptCacheKey — BUMP mỗi khi sửa prompt để
 // bust cache kịch bản cũ (không thì render lại vẫn dùng kịch bản theo prompt cũ).
-const narrationPromptVersion = "v5"
+const narrationPromptVersion = "v6"
 
-// ─── Công thức hook (v4) ──────────────────────────────────────────────────────
+// ─── 4 khung kể chuyện A–D (SPEC Dayladau §3.1) ──────────────────────────────
 
-// hookFormulas: công thức mở đầu viral cho TikTok Việt. Hook trong 1–3 giây đầu
-// quyết định retention (creator top tái dùng template thay biến, không sáng tác
-// tự do) — nên prompt giao hẳn MỘT công thức thay vì để Claude tự nghĩ.
+// hookFormulas: 4 khung mở đầu đã kiểm chứng từ 3 video viral đối chứng. Hook
+// trong 5–7 giây đầu (trên cảnh đi đường) quyết định retention — prompt giao hẳn
+// MỘT khung thay vì để Claude tự nghĩ. Deterministic theo ListingID để mỗi căn
+// một khung (đa dạng giữa video) nhưng cache kịch bản còn tác dụng.
 var hookFormulas = []string{
-	`GIÁ SỐC — nêu ngay giá rẻ bất ngờ hoặc con số gây chú ý trong câu đầu (giá viết thành CHỮ), kiểu "xịn cỡ này mà giá chỉ..."`,
-	`CẢNH BÁO — mở bằng lời cảnh báo ngược đời, kiểu "đừng vội đặt phòng ở <khu vực> khi chưa xem hết căn này"`,
-	`TRƯỚC–SAU — đối lập kỳ vọng với thực tế, kiểu "tưởng homestay bình thường, ai ngờ bước vào..."`,
-	`CÂU HỎI — mở bằng câu hỏi trúng nỗi lòng người xem, kiểu "cuối tuần chưa biết trốn đi đâu đúng không?"`,
-	`SỰ THẬT SỐC — một khẳng định nghe vô lý nhưng có thật về căn phòng, khiến người xem tò mò phải xem tiếp`,
-	`GIẤU GIÁ — úp mở "giá để cuối video, xem hết kẻo tiếc" để giữ chân; đoạn CUỐI bắt buộc đọc giá bằng chữ (không có giá trong dữ liệu thì úp mở chi tiết đắt nhất thay vì giá)`,
+	`KHUNG A — POV TRẢI NGHIỆM: phủ định kẻ thù chung + neo giá + gọi tên tệp. Ví dụ: "Thôi dẹp mấy cái nhà nghỉ tối om đi. Cầm [giá bằng chữ] là book được nguyên căn thế này cho hai người nha các vợ."`,
+	`KHUNG B — NHÂN VẬT THỨ HAI: mở bằng drama người yêu/bạn thân + gây tò mò. Ví dụ: "Chuyện là anh quen phải cô người yêu cực kỳ khó tính, mà lại còn tiết kiệm mới đau."`,
+	`KHUNG C — GỌI THẲNG CHÂN DUNG: gọi tệp + phủ định lựa chọn cũ của tệp. Ví dụ: "Sinh viên mà cứ đâm đầu vào nhà nghỉ làm gì, vừa cũ vừa chả có tí riêng tư."`,
+	`KHUNG D — BÓC PHỐT NGƯỢC: tuyên bố nghi ngờ rồi đi kiểm chứng tận nơi. Ví dụ: "Anh từng nghĩ homestay giá rẻ toàn ảnh mạng lừa tình. Nên hôm nay anh đi kiểm tra tận nơi cho các vợ xem."`,
 }
 
-// pickHookFormula chọn công thức hook deterministic theo ListingID: mỗi căn một
-// kiểu (đa dạng giữa các video) nhưng ổn định để cache kịch bản còn tác dụng.
+// pickHookFormula chọn khung hook deterministic theo ListingID.
 func pickHookFormula(listingID string) string {
 	h := fnv.New32a()
 	h.Write([]byte(listingID))
 	return hookFormulas[int(h.Sum32())%len(hookFormulas)]
+}
+
+// ctaStyles: 3 kiểu CTA vai NGƯỜI MÁCH DEAL (SPEC §3.5), xoay theo ListingID
+// (salt khác pickHookFormula để không dính cứng khung A luôn đi với CTA 1).
+var ctaStyles = []string{
+	`KHAN HIẾM — kiểu "book lẹ đi, căn này cuối tuần là hết chỗ đấy".`,
+	`GỌI CHÂN DUNG — kiểu "cặp nào muốn cuối tuần khác đi một tí thì căn này quá hợp lý luôn".`,
+	`COMMENT-BAIT (tốt cho thuật toán) — kiểu "đứa nào đi về rồi vào đây xác nhận cho anh cái" / "muốn anh review thêm căn nào thì comment khu vực".`,
+}
+
+func pickCTAStyle(listingID string) string {
+	h := fnv.New32a()
+	h.Write([]byte("cta|" + listingID))
+	return ctaStyles[int(h.Sum32())%len(ctaStyles)]
 }
 
 // ─── Ví dụ mẫu few-shot (v4) ─────────────────────────────────────────────────
@@ -286,12 +309,10 @@ func narrationStaticExamples(persona string) []string {
 		}
 	}
 	return []string{
-		// GIÁ SỐC
-		`{"segments":[{"image_index":0,"caption":"Toàn cảnh","narration":"Chào các con vợ, căn studio Mây Trắng xinh cỡ này mà giá chỉ hai trăm chín mươi chín nghìn một đêm, tưởng đùa mà thật nha."},{"image_index":1,"caption":"Góc bếp","narration":"Góc bếp đủ đồ tới mức lười như tôi cũng đòi vào nấu cơm, mà chưa sốc bằng góc sau đâu."},{"image_index":2,"caption":"Chốt phòng","narration":"Ưng thì inbox tôi giữ phòng liền tay, chậm chân là con vợ khác nẫng mất căn Mây Trắng đó nha."}]}`,
-		// CẢNH BÁO
-		`{"segments":[{"image_index":0,"caption":"Toàn cảnh","narration":"Chào các con vợ, đừng vội chốt phòng Đà Lạt khi chưa xem hết căn Sương Sớm này, coi xong kiểu gì cũng đổi ý."},{"image_index":1,"caption":"Ban công","narration":"Ban công nhìn thẳng ra đồi thông, sáng pha ly cà phê đứng đây là sống ảo cháy máy luôn."},{"image_index":2,"caption":"Chốt phòng","narration":"Cuối tuần trốn deadline lên đây là hết nước chấm, nhắn tôi liền để còn giữ căn Sương Sớm cho kịp nha mấy con vợ."}]}`,
-		// GIẤU GIÁ (đoạn cuối trả nợ giá)
-		`{"segments":[{"image_index":0,"caption":"Toàn cảnh","narration":"Chào các con vợ, căn Hồng Phấn này làm tôi xỉu up xỉu down, còn giá thì để cuối video, xem hết kẻo tiếc nha."},{"image_index":1,"caption":"Bồn tắm","narration":"Bồn tắm kê ngay cửa sổ thế này, chụp một tấm là đẹp hơn nhà người yêu cũ liền."},{"image_index":2,"caption":"Chốt phòng","narration":"Giá chỉ bốn trăm năm mươi nghìn một đêm thôi các con vợ ơi, chốt lẹ kẻo hết, inbox tôi giữ phòng cho."}]}`,
+		// KHUNG A — tệp couple ("các vợ"), có intro cảnh đi đường. Dữ liệu HƯ CẤU.
+		`{"intro_narration":"Thôi dẹp mấy cái nhà nghỉ tối om nhìn đã hết muốn yêu đi. Cầm ba trăm hai chín nghìn là book được nguyên căn homestay xịn thế này cho hai người nha các vợ.","intro_caption":"Đi đường","segments":[{"image_index":0,"caption":"Cửa phòng","narration":"Lý do anh nghiện homestay á, check-in tự động, không lễ tân, không ai nhìn ai."},{"image_index":1,"caption":"Giường ngủ","narration":"Nhìn cái giường kia chưa, đệm dày sụ, người yêu anh thích nhún nhảy là mê ngay."},{"image_index":2,"caption":"Máy chiếu","narration":"Máy chiếu nét căng, tắt đèn cái là thành rạp phim riêng của hai đứa."},{"image_index":3,"caption":"Ban công","narration":"Ban công hóng gió ngắm đèn thành phố, chill tít."},{"image_index":4,"caption":"Toàn cảnh","narration":"Mà hay nhất là đặt theo giờ được nha, đi mấy tiếng trả tiền mấy tiếng."},{"image_index":5,"caption":"Chốt phòng","narration":"Các vợ muốn trải nghiệm thì book lẹ, căn này cuối tuần là hết chỗ đấy."}]}`,
+		// KHUNG D — tệp genz ("mấy đứa"), bóc phốt ngược, giá trả ở gần cuối.
+		`{"intro_narration":"Anh từng nghĩ homestay giá rẻ toàn ảnh mạng lừa tình thôi. Nên hôm nay anh đi kiểm tra tận nơi cho mấy đứa xem.","intro_caption":"Đi đường","segments":[{"image_index":0,"caption":"Cửa vào","narration":"Book trên app xong hướng dẫn vào phòng gửi về máy, đến nơi chả phải gặp ai, điểm cộng đầu tiên."},{"image_index":1,"caption":"Toàn cảnh","narration":"Mở cửa ra và ừ thì, anh định bóc phốt mà không có gì để bóc, phòng thật còn xinh hơn ảnh."},{"image_index":2,"caption":"Tiện nghi","narration":"Đệm dày, máy chiếu xịn, vệ sinh sạch bong đủ đồ, với hai trăm bốn chín nghìn thì anh chịu, không cãi được."},{"image_index":3,"caption":"Chốt phòng","narration":"Book theo giờ cũng được nha, thôi mấy đứa tự đi kiểm chứng, về vào đây xác nhận cho anh cái."}]}`,
 	}
 }
 
@@ -315,61 +336,164 @@ func narrationExamplesBlock(persona string) string {
 	return b.String()
 }
 
+// isLichsu: persona "lịch sự" (không theo SPEC Dayladau, giữ prompt cũ).
+func isLichsu(persona string) bool {
+	return strings.EqualFold(strings.TrimSpace(persona), "lichsu")
+}
+
+// audienceTerms trả (cách gọi tệp, mô tả tệp) theo cfg.Audience (SPEC §1.1).
+func audienceTerms(audience string) (call, desc string) {
+	if strings.EqualFold(strings.TrimSpace(audience), "genz") {
+		return `"các em" / "mấy đứa"`, "giới trẻ / sinh viên"
+	}
+	return `"các vợ" / "mấy con vợ"`, "couple trẻ 18–28"
+}
+
 // narrationFullSystemPrompt = prompt hệ thống hoàn chỉnh dùng chung cho cả hai
-// nguồn Claude: quy tắc + phong cách persona + công thức hook theo listing +
-// khối TỰ KIỂM (self-check 1 lượt) + ví dụ mẫu few-shot.
+// nguồn Claude: quy tắc + phong cách persona + khung kể + CTA + (intro) +
+// khối TỰ KIỂM + ví dụ mẫu few-shot.
 func narrationFullSystemPrompt(cfg Config, wordBudget int) string {
 	var b strings.Builder
-	b.WriteString(narrationSystemPrompt(cfg.NarrationPersona, wordBudget))
-	b.WriteString("\n\nCÔNG THỨC HOOK CHO VIDEO NÀY (bắt buộc dùng cho đoạn đầu): ")
-	b.WriteString(pickHookFormula(cfg.ListingID))
-	b.WriteString(`
+	b.WriteString(narrationSystemPrompt(cfg, wordBudget))
 
-TỰ KIỂM TRƯỚC KHI IN JSON — sai điều nào thì sửa xong mới in:
-1. Câu ĐẦU TIÊN của đoạn một: đúng công thức hook ở trên, tối đa khoảng 15 từ, có TÊN căn hộ (không có tên thì dùng khu vực), và đúng câu mở đầu bắt buộc của phong cách.
-2. Đoạn một có một câu úp mở giữ chân người xem đến cuối video.
-3. Mỗi đoạn nằm trong ngân sách từ; KHÔNG còn chữ số nào; caption 2–4 từ.
-4. Đoạn cuối kêu gọi hành động về CĂN HỘ, không kêu lưu/tải/chia sẻ video; nếu hook đã hứa "giá để cuối video" thì đoạn cuối phải đọc giá bằng chữ.
-5. Không bịa đồ vật/tiện nghi/giá ngoài ảnh và dữ liệu; không lấy chi tiết nào từ ví dụ mẫu.
-6. hook_line1 và hook_line2 mỗi dòng tối đa 26 ký tự; hook_emphasis nằm NGUYÊN VĂN trong một trong hai dòng; giá trong hook khớp đúng dữ liệu (không bịa).`)
+	if isLichsu(cfg.NarrationPersona) {
+		b.WriteString("\n\nĐoạn mở đầu là HOOK giữ chân trong 3 giây: chào ngắn gọn, nêu TÊN căn hộ (không có tên thì dùng khu vực) + một điểm hấp dẫn (giá tốt / vị trí / không gian) rồi mời xem tiếp, diễn đạt lịch thiệp.")
+		b.WriteString(narrationSelfCheckLichsu())
+		b.WriteString(narrationExamplesBlock(cfg.NarrationPersona))
+		return b.String()
+	}
+
+	// haihuoc = kênh Dayladau, theo SPEC.
+	b.WriteString("\n\nKHUNG KỂ CHUYỆN CHO VIDEO NÀY (bắt buộc dùng cho hook): ")
+	b.WriteString(pickHookFormula(cfg.ListingID))
+	b.WriteString("\n\nKIỂU CTA CHO ĐOẠN CUỐI (vai NGƯỜI MÁCH DEAL, không phải sale): ")
+	b.WriteString(pickCTAStyle(cfg.ListingID))
+	if introEnabled(cfg) {
+		b.WriteString(narrationIntroGuidance())
+	} else {
+		b.WriteString("\n\nVIDEO NÀY KHÔNG CÓ CẢNH ĐI ĐƯỜNG: ẢNH ĐẦU TIÊN chính là HOOK — câu đầu mở theo đúng khung được giao (kèm tên/khu vực căn hộ) + neo giá thật. KHÔNG viết \"intro_narration\".")
+	}
+	b.WriteString(narrationSelfCheckV6(introEnabled(cfg)))
 	b.WriteString(narrationExamplesBlock(cfg.NarrationPersona))
 	return b.String()
 }
 
 // narrationSystemPrompt: wordBudget > 0 → ép mỗi đoạn ngắn cho vừa thời lượng
-// mục tiêu; 0 → như cũ (không giới hạn).
-func narrationSystemPrompt(persona string, wordBudget int) string {
+// mục tiêu; 0 → không giới hạn. lichsu giữ nguyên prompt cũ; haihuoc = v6 SPEC.
+func narrationSystemPrompt(cfg Config, wordBudget int) string {
+	persona := cfg.NarrationPersona
 	lenRule := "Mỗi đoạn khoảng 2 câu"
 	if wordBudget > 0 {
 		lenRule = fmt.Sprintf("Mỗi đoạn khoảng 2 câu NGẮN, TỐI ĐA %d từ — đây là video TikTok ngắn, dài hơn sẽ bị cắt. Riêng đoạn ĐẦU và đoạn CUỐI được dài tới %d từ (để đủ chỗ hook + tên căn hộ / CTA)", wordBudget, wordBudget*2)
 	}
-	base := `Bạn là người dẫn chuyện cho video review homestay đăng TikTok. Nhiệm vụ: nhìn từng ảnh phòng và viết lời kể tiếng Việt cho MỖI ảnh, dẫn dắt người xem đi tour căn phòng như thật. Người xem quyết định lướt hay ở lại trong 1–3 giây đầu, nên đoạn mở đầu là phần quan trọng nhất của cả kịch bản.
+
+	if isLichsu(persona) {
+		base := `Bạn là người dẫn chuyện cho video review homestay đăng TikTok. Nhiệm vụ: nhìn từng ảnh phòng và viết lời kể tiếng Việt cho MỖI ảnh, dẫn dắt người xem đi tour căn phòng như thật. Người xem quyết định lướt hay ở lại trong 1–3 giây đầu, nên đoạn mở đầu là phần quan trọng nhất của cả kịch bản.
 
 Quy tắc bắt buộc:
 - Đúng MỘT đoạn lời kể cho MỖI ảnh, theo đúng thứ tự ảnh (image_index tăng dần từ 0).
 - ` + lenRule + `, nói đúng thứ nhìn thấy trong ảnh (giường, bếp, sofa, ban công, quả cầu disco...). Không bịa thứ không có trong ảnh.
-- Ảnh ĐẦU TIÊN = HOOK giữ chân trong 3 giây đầu: mở theo đúng CÔNG THỨC HOOK được giao bên dưới, câu đầu ngắn gọn (≤ 15 từ), GIỚI THIỆU TÊN căn hộ (lấy đúng "Tên/nickname" trong dữ liệu; không có tên thì dùng khu vực/địa chỉ), và kèm MỘT câu úp mở giữ người xem đến cuối ("xem đến cuối...", "giá để cuối video..."). KHÔNG mở đầu kiểu giới thiệu dài dòng.
-- Các ảnh GIỮA: mỗi đoạn chỉ xoáy vào MỘT chi tiết đắt giá nhất trong ảnh (đừng liệt kê tất cả); thỉnh thoảng thêm nửa câu bắc cầu gây tò mò sang cảnh sau ("mà chưa sốc bằng cái sau...").
+- Ảnh ĐẦU TIÊN = HOOK giữ chân trong 3 giây đầu: câu đầu ngắn gọn (≤ 15 từ), GIỚI THIỆU TÊN căn hộ (lấy đúng "Tên/nickname" trong dữ liệu; không có tên thì dùng khu vực/địa chỉ), và kèm MỘT câu úp mở giữ người xem đến cuối. KHÔNG mở đầu kiểu giới thiệu dài dòng.
+- Các ảnh GIỮA: mỗi đoạn chỉ xoáy vào MỘT chi tiết đắt giá nhất trong ảnh (đừng liệt kê tất cả); thỉnh thoảng thêm nửa câu bắc cầu gây tò mò sang cảnh sau.
 - Ảnh CUỐI: lời kêu gọi hành động về CĂN HỘ — đặt phòng / nhắn tin / ghé trải nghiệm, nhắc lại tên căn hộ nếu tự nhiên; nếu hook đã hứa tiết lộ giá thì PHẢI đọc giá ở đây (bằng chữ). TUYỆT ĐỐI KHÔNG kêu người xem lưu video, tải video hay chia sẻ video.
 - TUYỆT ĐỐI viết mọi con số và giá tiền trong NARRATION thành CHỮ tiếng Việt (ví dụ "năm trăm mười chín nghìn đồng", "hai người"), KHÔNG dùng chữ số, vì lời kể sẽ được đọc thành giọng nói. Quy tắc này CHỈ áp dụng cho narration — riêng hook_line ĐƯỢC dùng chữ số.
 - caption là nhãn phòng cực ngắn 2–4 từ (ví dụ "Phòng khách", "Góc bếp", "Giường ngủ").
 - NGOÀI lời kể, viết TIÊU ĐỀ GHIM hiện trên màn hình trong cảnh đầu (chữ hiển thị, KHÔNG đọc thành tiếng): "hook_line1" = tên căn hộ hoặc khu vực + 1-2 từ mồi (tối đa 26 ký tự); "hook_line2" = giá mồi gây chú ý, dùng chữ số cho gọn, kiểu "Chỉ 199k/2 người" (tối đa 26 ký tự; không có giá trong dữ liệu thì thay bằng twist đắt nhất); "hook_emphasis" = cụm muốn tô màu nổi bật (thường là giá), PHẢI xuất hiện NGUYÊN VĂN trong một trong hai dòng.
 - Giọng văn tự nhiên, dễ thương, không sáo rỗng.`
-
-	if strings.EqualFold(strings.TrimSpace(persona), "lichsu") {
 		return base + `
 
-Phong cách: LỊCH SỰ, nhẹ nhàng, chuyên nghiệp như một hướng dẫn viên tinh tế. Không đùa cợt, không tiếng lóng. Đoạn đầu vẫn phải là hook theo công thức được giao (chào ngắn gọn rồi vào thẳng hook), chỉ khác là diễn đạt lịch thiệp.`
+Phong cách: LỊCH SỰ, nhẹ nhàng, chuyên nghiệp như một hướng dẫn viên tinh tế. Không đùa cợt, không tiếng lóng, diễn đạt lịch thiệp.`
 	}
-	return base + `
 
-Phong cách: HÀI HƯỚC kiểu TikTok — bạn là đứa bạn thân lầy lội dẫn hội chị em đi xem phòng, KHÔNG phải nhân viên sales đọc kịch bản.
-- Đoạn ĐẦU TIÊN bắt buộc mở bằng đúng cụm "Chào các con vợ" rồi vào THẲNG cú hook theo công thức được giao (kèm TÊN căn hộ) — không vòng vo kiểu "hôm nay tôi sẽ giới thiệu...".
-- Xưng "tôi", gọi người xem là "các con vợ" / "mấy con vợ" xuyên suốt; thỉnh thoảng đổi "chị em", "mấy bé" cho đỡ nhàm.
-- Mỗi đoạn có ít nhất MỘT câu đùa hoặc cường điệu bắt trend TikTok: kiểu "nằm phát quên luôn deadline", "sống ảo cháy máy", "xỉu up xỉu down", "đẹp hơn nhà người yêu cũ"... (tự sáng tạo cho hợp ảnh, đừng lặp nguyên văn ví dụ, đừng dùng lại một kiểu đùa ở hai đoạn).
-- Chỉ được cường điệu CẢM XÚC; tuyệt đối KHÔNG bịa thêm đồ vật, tiện nghi hay giá không có trong ảnh/dữ liệu.
-- Đoạn CUỐI là lời kêu gọi hành động cũng phải hài, xoay quanh CĂN HỘ: giục chốt đơn / đặt phòng / inbox kiểu "chốt lẹ kẻo con vợ khác nẫng mất phòng", "inbox tôi giữ phòng liền tay kẻo hết". KHÔNG kêu lưu/tải video.
-- Hài duyên dáng: KHÔNG từ tục, KHÔNG nhạy cảm, không kém sang.`
+	// ── haihuoc v6 (SPEC Dayladau) — tự chứa, KHÔNG dùng base lichsu ──
+	call, desc := audienceTerms(cfg.Audience)
+	return `Bạn là "ANH" — một người từng trải đang MÁCH chỗ hay cho người quen, KHÔNG phải thương hiệu hay nhân viên sale. Nhiệm vụ: nhìn từng ảnh phòng homestay và viết lời kể tiếng Việt cho MỖI ảnh, dẫn người xem đi tour như thật cho video TikTok dọc. Người xem quyết định lướt hay ở lại trong 1–3 giây đầu.
+
+XƯNG HÔ & GIỌNG:
+- Xưng "anh" xuyên suốt. Gọi khán giả là ` + call + ` (tệp mục tiêu: ` + desc + `).
+- Giọng đời, tếu, như bạn bè kể chuyện: có cảm thán ("ôi trời", "anh chịu", "hết nước chấm"), có đùa, phóng đại khẩu ngữ ("nét căng", "thơm nức", "xỉu up xỉu down").
+- SẠCH tuyệt đối (kênh mang danh Dayladau): CẤM các từ "đéo", "đm", "vcl", "vl", "vãi", "dẹp mẹ", "cức", "lồn", "cặc" và mọi biến thể.
+- Ẩn ý couple chỉ ở mức ĐÙA GIÁN TIẾP (chuẩn: đệm dày + "nhún nhảy thả ga"); CẤM mô tả hành vi tình dục trực tiếp, cấm từ 18+ trần trụi. Ranh giới: đọc to trước phụ huynh mà chỉ gây cười chứ không gây sốc → đạt.
+
+QUY TẮC CƠ HỌC:
+- Đúng MỘT đoạn lời kể cho MỖI ảnh, theo đúng thứ tự ảnh (image_index tăng dần từ 0).
+- ` + lenRule + `, nói đúng thứ nhìn thấy trong ảnh. Không bịa thứ không có trong ảnh.
+- TUYỆT ĐỐI viết mọi con số và giá tiền trong NARRATION (kể cả intro_narration) thành CHỮ tiếng Việt ("ba trăm hai chín nghìn", "hai người"), KHÔNG dùng chữ số — lời kể sẽ đọc thành tiếng. Quy tắc này CHỈ cho narration — riêng hook_line ĐƯỢC dùng chữ số.
+- caption là nhãn phòng cực ngắn 2–4 từ.
+- NGOÀI lời kể, viết TIÊU ĐỀ GHIM (hiện trên màn hình, KHÔNG đọc): "hook_line1" = tên căn hộ/khu vực + 1-2 từ mồi (≤26 ký tự); "hook_line2" = giá mồi kiểu "Chỉ 199k/2 người" (≤26 ký tự, dùng chữ số cho gọn); "hook_emphasis" = cụm tô màu (thường là giá), PHẢI nằm NGUYÊN VĂN trong một trong hai dòng.
+
+SÁU YẾU TỐ BẮT BUỘC (thiếu 1 là hỏng):
+1. INSIGHT RIÊNG TƯ trong 10 giây đầu: "check-in tự động, không lễ tân, không ai nhìn ai" — đây mới là lý do mua thật, nói TRƯỚC khi khoe phòng đẹp.
+2. NEO GIÁ THẬT trong 8 giây đầu: lấy đúng giá trong DỮ LIỆU, viết thành CHỮ. Cấm bịa giá, cấm mặc định 199k. Nếu có giá THEO GIỜ thì ưu tiên nêu (lợi thế riêng Dayladau).
+3. KẺ THÙ CHUNG ngay hook: đối lập với "nhà nghỉ cũ kỹ / tối om / chả có tí riêng tư". Định vị bằng đối lập, KHÔNG tự khen chay.
+4. XỬ LÝ HOÀI NGHI "rẻ = xấu": một câu phủ đầu kiểu "giá này mà phòng không hề ọp ẹp đâu nha" / "anh cũng không tin cho tới khi mở cửa ra".
+5. MỘT TIỆN ÍCH ANH HÙNG (đúng 1/video): chọn tiện ích nổi bật nhất, tả ĐẬM 2 câu + 1 câu đùa; các tiện ích khác lướt nhanh 1 câu hoặc gộp 2–3 cái/câu, KHÔNG dàn đều. Thứ tự ưu tiên chọn: (1) đệm/giường nếu nhìn dày/đẹp nổi bật, (2) bồn tắm, (3) máy chiếu, (4) ban công view đẹp.
+6. CTA VAI NGƯỜI MÁCH DEAL ở đoạn cuối (theo kiểu CTA được giao). CẤM giọng thương hiệu.
+
+BẢNG TẢ TIỆN ÍCH (chỉ dùng cho tiện ích CÓ THẬT trong ảnh/dữ liệu; tả bằng TRẢI NGHIỆM + CẢM XÚC, cấm thông số khô — ngoại lệ: số tự gây ấn tượng như đệm "ba mươi phân"):
+- Giường/đệm dày → ẩn ý couple (ứng viên số 1 anh hùng): "đệm dày sụ êm ru, thích nhún nhảy là mê ngay".
+- Máy chiếu / TV lớn → hẹn hò tại gia, xem phim ôm nhau: "tắt đèn đi là thành rạp phim riêng của hai đứa".
+- Bồn tắm → chill sang chảnh giá rẻ (ứng viên anh hùng): "tiền nhà nghỉ mà trải nghiệm khách sạn năm sao".
+- Ban công / view → khoảnh khắc riêng tư, hóng gió ngắm đêm: "ngắm đèn thành phố, chill tít".
+- Khoá từ / check-in tự động → RIÊNG TƯ, không gặp ai (luôn nhắc): "quẹt thẻ bấm pass là vào, chả ma nào biết".
+- Bếp / bồn rửa → nấu cho nhau ăn = hẹn hò tiết kiệm: "có bếp nấu ăn luôn, khỏi tốn tiền đi hàng".
+- Board game / đồ chơi → ở lì cả ngày không chán.
+- Gương lớn / đèn LED / decor → góc sống ảo, lên hình xinh.
+- Nhà vệ sinh khép kín, amenities → chu đáo đủ đồ, khỏi mang gì.
+- Điều hoà / rèm dày → ngủ nướng, trốn nắng trốn đời.
+- Tủ lạnh / ấm đun → tiện nhỏ, ghép vào câu tiện ích khác, không đứng riêng.
+` + audienceAxis(cfg.Audience) + `
+
+CÚ CHỐT DAYLADAU (bắt buộc, 1 câu ngay trước CTA): nhắc ĐẶT THEO GIỜ được — "đi mấy tiếng trả tiền mấy tiếng, khỏi ôm nguyên đêm" (viết lại đa dạng). Book qua APP nhắc tự nhiên như công cụ nhân vật dùng. Tên brand đọc trong lời: "Đây Là Đâu".
+
+CẤM TRONG CTA (ngôn ngữ quảng cáo truyền thống): "hân hạnh", "trân trọng", "ưu đãi hấp dẫn", "nhanh tay kẻo lỡ", "liên hệ hotline". CTA xoay quanh CĂN HỘ; TUYỆT ĐỐI KHÔNG kêu người xem lưu / tải / chia sẻ video.`
+}
+
+// audienceAxis: chỉnh trục cảm xúc bảng tiện ích theo tệp (SPEC §3.3).
+func audienceAxis(audience string) string {
+	if strings.EqualFold(strings.TrimSpace(audience), "genz") {
+		return `TỆP GIỚI TRẺ/SINH VIÊN: đổi trục cảm xúc từ "riêng tư couple" sang "RẺ MÀ XỊN + SỐNG ẢO": đệm → "nhún thả ga", decor → "góc nào cũng lên hình", giá → "ví sinh viên là hợp lý hết nước chấm".`
+	}
+	return `TỆP COUPLE: giữ trục "riêng tư + hẹn hò", ẩn ý couple ở mức đùa gián tiếp.`
+}
+
+// narrationIntroGuidance: hướng dẫn viết intro_narration khi có cảnh đi đường.
+func narrationIntroGuidance() string {
+	return `
+
+CẢNH MỞ ĐẦU LÀ VIDEO QUAY CẢNH ĐI ĐƯỜNG (không phải ảnh phòng) — viết thêm trường "intro_narration": 1-2 câu HOOK đọc trên cảnh đó theo đúng KHUNG được giao, tối đa khoảng 20 từ, bắn được ÍT NHẤT 2 trong 3 móc (kẻ thù chung / giá thật bằng chữ / gọi tên tệp); móc còn thiếu phải xuất hiện ngay đoạn ảnh đầu tiên. Thêm "intro_caption": nhãn 2-4 từ (ví dụ "Đi đường").
+Khi đó ẢNH ĐẦU TIÊN (segment image_index 0) là câu DẪN DẮT: cài INSIGHT RIÊNG TƯ + check-in tự động ("book xong hướng dẫn vào phòng gửi về máy, đến nơi không phải gặp ai"). Nếu hook đã cài riêng tư rồi thì đoạn này cài câu xử lý hoài nghi "rẻ = xấu".`
+}
+
+// narrationSelfCheckV6: khối tự kiểm cho haihuoc (SPEC §8 rút gọn, soft).
+func narrationSelfCheckV6(withIntro bool) string {
+	introLine := ""
+	if withIntro {
+		introLine = "\n0. Có \"intro_narration\" đúng khung được giao (≤~20 từ, ≥2/3 móc); ảnh đầu tiên là câu dẫn dắt cài riêng tư + check-in tự động."
+	}
+	return `
+
+TỰ KIỂM TRƯỚC KHI IN JSON — sai điều nào thì sửa xong mới in:` + introLine + `
+1. Đủ SÁU YẾU TỐ BẮT BUỘC? Có ĐÚNG MỘT tiện ích anh hùng (tả đậm hơn hẳn phần còn lại)?
+2. Neo GIÁ THẬT (bằng chữ) trong 8 giây đầu, khớp đúng DỮ LIỆU (không bịa)?
+3. Có 1 câu ĐẶT THEO GIỜ ngay trước CTA? CTA đúng kiểu được giao, KHÔNG kêu lưu/tải/chia sẻ video?
+4. Mỗi đoạn trong ngân sách từ; KHÔNG còn chữ số nào trong narration; caption 2–4 từ.
+5. KHÔNG chứa từ cấm (đéo, đm, vcl, vl, vãi, dẹp mẹ, cức, lồn, cặc) và KHÔNG ngôn ngữ quảng cáo (hân hạnh, trân trọng, ưu đãi hấp dẫn, nhanh tay kẻo lỡ, hotline)?
+6. Không bịa đồ vật/tiện nghi/giá ngoài ảnh và dữ liệu; không lấy chi tiết nào từ ví dụ mẫu.
+7. hook_line1/hook_line2 mỗi dòng ≤26 ký tự; hook_emphasis nằm NGUYÊN VĂN trong 1 dòng; giá hook khớp dữ liệu.`
+}
+
+// narrationSelfCheckLichsu: khối tự kiểm cho persona lịch sự (giữ tinh thần v5).
+func narrationSelfCheckLichsu() string {
+	return `
+
+TỰ KIỂM TRƯỚC KHI IN JSON — sai điều nào thì sửa xong mới in:
+1. Câu ĐẦU TIÊN là hook lịch thiệp, tối đa khoảng 15 từ, có TÊN căn hộ (không có tên thì dùng khu vực).
+2. Đoạn một có một câu úp mở giữ chân người xem đến cuối video.
+3. Mỗi đoạn nằm trong ngân sách từ; KHÔNG còn chữ số nào; caption 2–4 từ.
+4. Đoạn cuối kêu gọi hành động về CĂN HỘ, không kêu lưu/tải/chia sẻ video.
+5. Không bịa đồ vật/tiện nghi/giá ngoài ảnh và dữ liệu; không lấy chi tiết nào từ ví dụ mẫu.
+6. hook_line1 và hook_line2 mỗi dòng tối đa 26 ký tự; hook_emphasis nằm NGUYÊN VĂN trong một trong hai dòng; giá trong hook khớp đúng dữ liệu.`
 }
 
 // narrationUserContext = phần dữ liệu listing đưa vào prompt (dùng chung 2 nguồn).
@@ -388,6 +512,10 @@ func narrationUserContext(cfg Config, n, wordBudget int) string {
 	}
 	if am := trimNonEmpty(cfg.Amenities); len(am) > 0 {
 		b.WriteString("- Tiện nghi: " + strings.Join(am, ", ") + "\n")
+	}
+	if !isLichsu(cfg.NarrationPersona) {
+		call, dsc := audienceTerms(cfg.Audience)
+		b.WriteString("- Tệp khán giả: " + dsc + " (gọi " + call + ")\n")
 	}
 	b.WriteString(fmt.Sprintf("\nTổng cộng %d ảnh → cần đúng %d đoạn lời kể.", n, n))
 	if wordBudget > 0 {
@@ -455,6 +583,14 @@ func validateScript(s *NarrationScript, n, wordBudget int, nickname string) *Nar
 			out.HookEmphasis = emph
 		}
 	}
+	// Intro (v6): lời hook cảnh đi đường — GIỮ LẠI (nếu dựng struct mới mà quên
+	// copy, kịch bản đã duyệt round-trip qua đây sẽ mất intro). Cũng đọc thành
+	// tiếng nên cảnh báo nếu còn chữ số.
+	out.IntroNarration = strings.TrimSpace(s.IntroNarration)
+	out.IntroCaption = strings.TrimSpace(s.IntroCaption)
+	if out.IntroNarration != "" && digitWarn(out.IntroNarration) {
+		fmt.Fprintf(os.Stderr, "⚠️  Lời hook cảnh đi đường còn chữ số (có thể đọc sai): %s\n", firstN(out.IntroNarration, 80))
+	}
 	for i := 0; i < n; i++ {
 		seg, ok := byIdx[i]
 		if !ok {
@@ -506,6 +642,80 @@ func digitWarn(s string) bool {
 	return false
 }
 
+// ─── Kiểm tra từ cấm (SPEC §1.1 tone clean + §3.5 ngôn ngữ quảng cáo) ────────
+
+// bannedProfanity: từ tục cấm ở tone clean (kênh mang danh Dayladau).
+var bannedProfanity = []string{"đéo", "đm", "vcl", "vl", "vãi", "dẹp mẹ", "cức", "lồn", "cặc"}
+
+// bannedTradAd: ngôn ngữ quảng cáo truyền thống cấm trong CTA/lời kể.
+var bannedTradAd = []string{"hân hạnh", "trân trọng", "ưu đãi hấp dẫn", "nhanh tay kẻo lỡ", "hotline"}
+
+func isWordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsMark(r) || (r >= '0' && r <= '9')
+}
+
+// containsBannedWord: tìm needle trong haystack theo BIÊN TỪ (không khớp giữa
+// từ khác) — "vl" không dính "vlog", "đm" không dính "đầm".
+func containsBannedWord(haystack, needle string) bool {
+	h := strings.ToLower(haystack)
+	nd := strings.ToLower(strings.TrimSpace(needle))
+	if nd == "" {
+		return false
+	}
+	from := 0
+	for {
+		rel := strings.Index(h[from:], nd)
+		if rel < 0 {
+			return false
+		}
+		i := from + rel
+		okBefore := i == 0
+		if !okBefore {
+			r, _ := utf8.DecodeLastRuneInString(h[:i])
+			okBefore = !isWordRune(r)
+		}
+		end := i + len(nd)
+		okAfter := end >= len(h)
+		if !okAfter {
+			r, _ := utf8.DecodeRuneInString(h[end:])
+			okAfter = !isWordRune(r)
+		}
+		if okBefore && okAfter {
+			return true
+		}
+		from = i + len(nd)
+	}
+}
+
+// scriptBannedHits trả danh sách từ cấm xuất hiện trong kịch bản (intro + mọi
+// narration + hook line). Soft — chỉ để cảnh báo, KHÔNG chặn render (user sửa
+// được ở panel).
+func scriptBannedHits(s *NarrationScript) []string {
+	if s == nil {
+		return nil
+	}
+	texts := []string{s.IntroNarration, s.HookLine1, s.HookLine2}
+	for _, seg := range s.Segments {
+		texts = append(texts, seg.Narration)
+	}
+	seen := map[string]bool{}
+	var hits []string
+	for _, list := range [][]string{bannedProfanity, bannedTradAd} {
+		for _, w := range list {
+			for _, t := range texts {
+				if containsBannedWord(t, w) {
+					if !seen[w] {
+						seen[w] = true
+						hits = append(hits, w)
+					}
+					break
+				}
+			}
+		}
+	}
+	return hits
+}
+
 // ─── Image encode cho API vision ────────────────────────────────────────────
 
 func encodeImageForVision(path string, maxEdge int) (string, string, error) {
@@ -530,15 +740,23 @@ func encodeImageForVision(path string, maxEdge int) (string, string, error) {
 
 // ─── Schema ─────────────────────────────────────────────────────────────────
 
-func narrationSchema() map[string]any {
+// narrationSchema: structured-output cho API. wantIntro=true (có cảnh đi đường)
+// → bắt buộc trường intro_narration.
+func narrationSchema(wantIntro bool) map[string]any {
+	required := []string{"segments"}
+	if wantIntro {
+		required = append(required, "intro_narration")
+	}
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             []string{"segments"},
+		"required":             required,
 		"properties": map[string]any{
-			"hook_line1":    map[string]any{"type": "string"},
-			"hook_line2":    map[string]any{"type": "string"},
-			"hook_emphasis": map[string]any{"type": "string"},
+			"hook_line1":      map[string]any{"type": "string"},
+			"hook_line2":      map[string]any{"type": "string"},
+			"hook_emphasis":   map[string]any{"type": "string"},
+			"intro_narration": map[string]any{"type": "string"},
+			"intro_caption":   map[string]any{"type": "string"},
 			"segments": map[string]any{
 				"type": "array",
 				"items": map[string]any{
@@ -559,12 +777,17 @@ func narrationSchema() map[string]any {
 // ─── Cache ──────────────────────────────────────────────────────────────────
 
 func scriptCacheKey(cfg Config, imgHashes []string) string {
-	// wordBudget nằm trong key: đổi thời lượng mục tiêu / provider → kịch bản khác.
-	_, wordBudget := narrationBudget(float64(cfg.TargetDuration), len(imgHashes), cfg.TTSProvider)
+	// wordBudget nằm trong key: đổi thời lượng mục tiêu / provider / intro → kịch bản khác.
+	_, wordBudget := narrationBudget(narrTargetSec(cfg), len(imgHashes), cfg.TTSProvider)
 	h := sha256.New()
 	h.Write([]byte("narr-" + narrationPromptVersion + "|"))            // bump version mỗi khi sửa prompt
 	h.Write([]byte(narrationExamplesHash(cfg.NarrationPersona) + "|")) // like/bỏ like ví dụ → prompt khác → key khác
 	h.Write([]byte(strconv.Itoa(wordBudget) + "|"))
+	// audience + intro đổi prompt/schema → kịch bản khác.
+	h.Write([]byte(cfg.Audience + "|"))
+	if introEnabled(cfg) {
+		h.Write([]byte("intro|"))
+	}
 	h.Write([]byte(cfg.ListingID + "|"))
 	h.Write([]byte(cfg.NarrationPersona + "|"))
 	h.Write([]byte(cfg.Nickname + "|" + cfg.Address + "|"))

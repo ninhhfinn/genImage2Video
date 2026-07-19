@@ -29,7 +29,7 @@ const ELEVEN_VOICES = [
 ]
 
 // Nút nghe thử giọng: gọi /api/tts-preview (backend cache) rồi phát.
-function VoicePreview({ provider, voice }) {
+function VoicePreview({ provider, voice, persona }) {
   const [busy, setBusy] = useState(false)
   const audioRef = useRef(null)
   const play = async () => {
@@ -38,7 +38,8 @@ function VoicePreview({ provider, voice }) {
     try {
       // _=Date.now(): né HTTP cache của browser — audio preview từng bị cache
       // max-age=3600 nên sửa model TTS xong bấm nghe thử vẫn ra audio cũ.
-      const url = `/api/tts-preview?provider=${encodeURIComponent(provider)}&voice=${encodeURIComponent(voice || '')}&_=${Date.now()}`
+      // persona: giọng mặc định "" khác nhau theo persona (haihuoc=Adam, lichsu=Trieu Duong).
+      const url = `/api/tts-preview?provider=${encodeURIComponent(provider)}&voice=${encodeURIComponent(voice || '')}&persona=${encodeURIComponent(persona || '')}&_=${Date.now()}`
       const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) {
         const e = await res.json().catch(() => ({}))
@@ -119,6 +120,8 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
   // Thuyết minh AI (cờ độc lập, ghép với motion mode)
   const narrate = !!settings.narrate
   const narrationPersona = settings.narrationPersona || 'haihuoc'
+  const audience = settings.audience || 'couple'
+  const introClip = settings.introClip ?? true
   const ttsProvider = settings.ttsProvider || 'google'
   const voiceId = settings.voiceId || ''
   // Dropdown ElevenLabs: chọn "Khác" → hiện ô nhập ID tay; ID lạ (không có
@@ -257,6 +260,30 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
               ))}
             </div>
 
+            {narrationPersona==='haihuoc' && (
+              <>
+                <label className="flabel" style={{marginBottom:6}}>Tệp khán giả</label>
+                <div className="seg" style={{marginBottom:8}}>
+                  {[['couple','💑 Cặp đôi (các vợ)'],['genz','🎓 Giới trẻ (các em)']].map(([v,l])=>(
+                    <button
+                      key={v}
+                      type="button"
+                      className={`seg-btn${audience===v?' on':''}`}
+                      onClick={()=>set('audience')(v)}
+                    >{l}</button>
+                  ))}
+                </div>
+
+                <div className="toggle-row" style={{marginBottom:8}}>
+                  <div className="ti">
+                    <div className="t1">🎬 Intro cảnh đi đường</div>
+                    <div className="t2">Hook đọc trên video quay thật mở đầu</div>
+                  </div>
+                  <div className={`toggle${introClip?' on':''}`} onClick={()=>set('introClip')(!introClip)}/>
+                </div>
+              </>
+            )}
+
             <label className="flabel" style={{marginBottom:6}}>Nhà cung cấp giọng (TTS)</label>
             <div className="seg" style={{marginBottom:8}}>
               {[['google','🆓 Google (free)'],['elevenlabs','ElevenLabs'],['fpt','FPT.AI']].map(([v,l])=>(
@@ -282,7 +309,7 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
                     <option key={v} value={v}>{l}</option>
                   ))}
                 </select>
-                <VoicePreview provider="fpt" voice={voiceId}/>
+                <VoicePreview provider="fpt" voice={voiceId} persona={narrationPersona}/>
               </div>
             )}
             {ttsProvider==='elevenlabs' && (
@@ -306,7 +333,7 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
                     </optgroup>
                     <option value="custom">Khác — nhập Voice ID…</option>
                   </select>
-                  <VoicePreview provider="elevenlabs" voice={voiceId}/>
+                  <VoicePreview provider="elevenlabs" voice={voiceId} persona={narrationPersona}/>
                 </div>
                 {elevenShowCustom && (
                   <input
@@ -324,7 +351,7 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
                 <div className="hint" style={{flex:1,opacity:0.7}}>
                   🆓 Google đọc tiếng Việt miễn phí, không cần key (giọng máy, hợp thử nhanh).
                 </div>
-                <VoicePreview provider="google" voice=""/>
+                <VoicePreview provider="google" voice="" persona={narrationPersona}/>
               </div>
             )}
             {ttsProvider==='elevenlabs' && (

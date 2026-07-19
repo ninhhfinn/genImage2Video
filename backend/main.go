@@ -83,6 +83,8 @@ type Config struct {
 	MaxSegments      int    // số cảnh tối đa (3–15); 0 → 10
 	TargetDuration   int    // narrated: thời lượng mục tiêu (giây); 0 → không giới hạn
 	SubtitleStyle    string // narrated: "karaoke" (mặc định) | "typewriter"
+	IntroClip        bool   // narrated: chèn video cảnh đi đường (assets/intro/street.mp4) mở đầu, hook đọc đè lên
+	Audience         string // narrated: tệp khán giả — "couple" (mặc định, gọi "các vợ") | "genz" (gọi "các em")
 
 	// Kịch bản do user duyệt/sửa từ panel FE (nil = để Claude viết).
 	Script *NarrationScript

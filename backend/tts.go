@@ -27,10 +27,12 @@ const (
 	// turbo_v2_5 chứ KHÔNG phải multilingual_v2: multilingual_v2 không hỗ trợ
 	// tiếng Việt (29 thứ tiếng, thiếu vi) — đọc text Việt ra tiếng lạ.
 	elevenModelID = "eleven_turbo_v2_5"
-	// Giọng tiếng Việt mặc định theo persona (giọng thư viện ElevenLabs — cần
-	// gói trả phí để dùng qua API; gói free sẽ bị 402, xem thông báo lỗi bên dưới).
-	elevenVoiceHaihuoc = "a3AkyqGG4v8Pg7SWQ0Y3" // Ngan — dễ thương, tươi tắn
-	elevenVoiceLichsu  = "UsgbMVmY3U59ijwK5mdh" // Trieu Duong — trầm, bình tĩnh
+	// Giọng mặc định theo persona. haihuoc (kênh Dayladau, persona "anh" xưng
+	// nam) = Adam — giọng premade NAM gọi được trên gói FREE (giọng thư viện như
+	// Ngan/Trieu Duong cần gói trả phí, gói free bị 402). Adam đọc tiếng Việt
+	// hơi lơ lớ accent Tây nhưng đúng chữ (model turbo_v2_5 hỗ trợ tiếng Việt).
+	elevenVoiceHaihuoc = "pNInz6obpgDQGcFmaJgB" // Adam — nam Mỹ, trầm (gói free)
+	elevenVoiceLichsu  = "UsgbMVmY3U59ijwK5mdh" // Trieu Duong — trầm, bình tĩnh (giọng thư viện, cần gói trả phí)
 	fptDefaultVoice    = "banmai"
 	ttsHTTPTimeout     = 60 * time.Second
 	ttsMaxAttempts     = 3
@@ -435,14 +437,18 @@ func ttsCacheKey(provider, voice, text string) string {
 
 // ─── Nghe thử giọng (UI chọn giọng cho mode narrated) ───────────────────────
 
-const ttsPreviewText = "Chào các con vợ nhé, hôm nay tôi sẽ giới thiệu căn hộ xinh xỉu này."
+const ttsPreviewText = "Thôi dẹp mấy cái nhà nghỉ tối om đi các vợ ơi, cầm hai trăm nghìn là book được căn xịn thế này rồi."
 
 // ttsPreviewHandler: GET /api/tts-preview?provider=fpt&voice=std_banmai
 // → trả audio mẫu (cache theo provider+voice để không tốn tiền gọi lại).
 func ttsPreviewHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		provider := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("provider")))
-		cfg := Config{TTSProvider: provider, VoiceID: strings.TrimSpace(r.URL.Query().Get("voice"))}
+		cfg := Config{
+			TTSProvider:      provider,
+			VoiceID:          strings.TrimSpace(r.URL.Query().Get("voice")),
+			NarrationPersona: strings.TrimSpace(r.URL.Query().Get("persona")), // giọng mặc định khác nhau theo persona
+		}
 		voice := resolveVoiceID(cfg)
 
 		key := ttsCacheKey(provider, voice, "preview|"+ttsPreviewText)

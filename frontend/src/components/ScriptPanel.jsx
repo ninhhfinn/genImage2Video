@@ -11,7 +11,10 @@ export default function ScriptPanel({ buildScriptReq, canFetch, approvedScript, 
   const [segments, setSegments] = useState(null)   // bản đang xem/sửa
   // Tiêu đề ghim (hook) 2 dòng + cụm nhấn màu — script cũ không có → ''
   const [hook, setHook]         = useState({ line1: '', line2: '', emphasis: '' })
+  // Lời hook đọc trên cảnh đi đường (intro) — chỉ có khi bật intro clip.
+  const [intro, setIntro]       = useState({ narration: '', caption: '', enabled: false })
   const [hookWarning, setHookWarning] = useState('') // giá hook lệch dữ liệu listing
+  const [warnings, setWarnings] = useState([])       // từ cấm / ngôn ngữ quảng cáo
   const [wordBudget, setBudget] = useState(0)
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
@@ -29,7 +32,13 @@ export default function ScriptPanel({ buildScriptReq, canFetch, approvedScript, 
         line2:    data.hook_line2    || '',
         emphasis: data.hook_emphasis || '',
       })
+      setIntro({
+        narration: data.intro_narration || '',
+        caption:   data.intro_caption   || '',
+        enabled:   !!data.intro_enabled,
+      })
       setHookWarning(data.hook_warning || '')
+      setWarnings(data.warnings || [])
       setBudget(data.word_budget || 0)
       onApprove(null) // bản mới sinh — chờ user duyệt lại
       if (force) toast('Đã viết lại kịch bản ✓', 'ok')
@@ -88,11 +97,40 @@ export default function ScriptPanel({ buildScriptReq, canFetch, approvedScript, 
                 hook_line1:    hook.line1,
                 hook_line2:    hook.line2,
                 hook_emphasis: hook.emphasis,
+                intro_narration: intro.narration,
+                intro_caption:   intro.caption,
               })}>✔ Dùng bản này khi render</button>
         )}
       </div>
       {!canFetch && <div className="hint" style={{ opacity: 0.7 }}>Upload ảnh / chọn listing trước đã.</div>}
       {error && <div className="hint" style={{ color: 'var(--red, #e5484d)' }}>{error}</div>}
+
+      {/* ── Cảnh báo từ cấm / ngôn ngữ quảng cáo (soft, không chặn render) ── */}
+      {segments && warnings.length > 0 && (
+        <div className="hint" style={{ color: 'var(--red, #e5484d)', marginBottom: 8 }}>
+          {warnings.map((wmsg, i) => <div key={i}>⚠️ {wmsg}</div>)}
+        </div>
+      )}
+
+      {/* ── Hook cảnh đi đường (intro) — đọc trên video quay thật mở đầu ── */}
+      {segments && intro.enabled && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3 }}>
+            <span className="hint" style={{ fontWeight: 600, opacity: 0.85 }}>🎬 Hook cảnh đi đường (đọc trên video)</span>
+            <span className="hint" style={{ opacity: 0.7, color: words(intro.narration) > 22 ? 'var(--red, #e5484d)' : undefined }}>
+              {words(intro.narration)}/~20 từ
+            </span>
+          </div>
+          <textarea
+            className="inp body-font"
+            value={intro.narration}
+            onChange={e => setIntro(v => ({ ...v, narration: e.target.value }))}
+            rows={2}
+            placeholder="1-2 câu hook đọc trên cảnh đi đường (số viết thành CHỮ)"
+            style={{ width: '100%', resize: 'vertical', fontSize: 12, lineHeight: 1.45 }}
+          />
+        </div>
+      )}
 
       {/* ── Tiêu đề ghim (hook) — 2 dòng hiện cố định trên video + cụm nhấn màu ── */}
       {segments && (
