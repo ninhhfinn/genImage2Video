@@ -16,6 +16,18 @@ const FPT_VOICES = [
   ['std_huyphong',  'Huy Phong — nam'],
 ]
 
+// Giọng ElevenLabs premade ĐỜI HIỆN HÀNH (tiếng Anh) — gói free gọi được qua
+// API; giọng thư viện VÀ premade đời cũ (Rachel/Josh...) đều bị chặn 402.
+// Đã test cả 5 id này trả audio thật trên gói free (2026-07-19).
+// Đọc tiếng Việt sẽ lơ lớ giọng Tây; muốn giọng khác thì chọn "Khác" và dán Voice ID.
+const ELEVEN_VOICES = [
+  ['pNInz6obpgDQGcFmaJgB', 'Adam — nam Mỹ, trầm'],
+  ['TX3LPaxmHKxFdv7VOQHJ', 'Liam — nam Mỹ trẻ, chất TikTok'],
+  ['JBFqnCBsd6RMkjVDRZzb', 'George — nam Anh, ấm'],
+  ['EXAVITQu4vr4xnSDxMaL', 'Sarah — nữ Mỹ, chững chạc'],
+  ['cgSgspJ2msm6clMCkdW9', 'Jessica — nữ Mỹ, tươi vui'],
+]
+
 // Nút nghe thử giọng: gọi /api/tts-preview (backend cache) rồi phát.
 function VoicePreview({ provider, voice }) {
   const [busy, setBusy] = useState(false)
@@ -107,6 +119,11 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
   const narrationPersona = settings.narrationPersona || 'haihuoc'
   const ttsProvider = settings.ttsProvider || 'google'
   const voiceId = settings.voiceId || ''
+  // Dropdown ElevenLabs: chọn "Khác" → hiện ô nhập ID tay; ID lạ (không có
+  // trong ELEVEN_VOICES) cũng tự tính là "Khác" để không nuốt mất ID cũ.
+  const [elevenCustom, setElevenCustom] = useState(false)
+  const elevenShowCustom =
+    elevenCustom || (!!voiceId && !ELEVEN_VOICES.some(([v]) => v === voiceId))
   const subtitleStyle = settings.subtitleStyle || 'karaoke'
   const maxSegments = settings.maxSegments ?? 10
   const targetDuration = settings.targetDuration ?? 60
@@ -267,15 +284,37 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
               </div>
             )}
             {ttsProvider==='elevenlabs' && (
-              <div style={{display:'flex',gap:6,marginBottom:8}}>
-                <input
-                  className="inp body-font"
-                  placeholder="Voice ID (bỏ trống = giọng mặc định)"
-                  value={voiceId}
-                  onChange={e=>set('voiceId')(e.target.value)}
-                  style={{flex:1,marginBottom:0}}
-                />
-                <VoicePreview provider="elevenlabs" voice={voiceId}/>
+              <div style={{marginBottom:8}}>
+                <div style={{display:'flex',gap:6}}>
+                  <select
+                    className="inp body-font"
+                    value={elevenShowCustom ? 'custom' : voiceId}
+                    onChange={e=>{
+                      const v = e.target.value
+                      if (v === 'custom') { setElevenCustom(true) }
+                      else { setElevenCustom(false); set('voiceId')(v) }
+                    }}
+                    style={{flex:1,marginBottom:0}}
+                  >
+                    <option value="">Mặc định theo persona</option>
+                    <optgroup label="Giọng Anh premade (đọc tiếng Việt hơi lơ lớ)">
+                      {ELEVEN_VOICES.map(([v,l])=>(
+                        <option key={v} value={v}>{l}</option>
+                      ))}
+                    </optgroup>
+                    <option value="custom">Khác — nhập Voice ID…</option>
+                  </select>
+                  <VoicePreview provider="elevenlabs" voice={voiceId}/>
+                </div>
+                {elevenShowCustom && (
+                  <input
+                    className="inp body-font"
+                    placeholder="Dán Voice ID ElevenLabs"
+                    value={voiceId}
+                    onChange={e=>set('voiceId')(e.target.value)}
+                    style={{marginTop:6,marginBottom:0}}
+                  />
+                )}
               </div>
             )}
             {ttsProvider==='google' && (

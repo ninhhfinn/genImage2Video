@@ -24,7 +24,9 @@ import (
 // Mỗi đoạn lời kể → 1 file mp3, cache theo hash(provider+model+voice+text).
 
 const (
-	elevenModelID = "eleven_multilingual_v2"
+	// turbo_v2_5 chứ KHÔNG phải multilingual_v2: multilingual_v2 không hỗ trợ
+	// tiếng Việt (29 thứ tiếng, thiếu vi) — đọc text Việt ra tiếng lạ.
+	elevenModelID = "eleven_turbo_v2_5"
 	// Giọng tiếng Việt mặc định theo persona (giọng thư viện ElevenLabs — cần
 	// gói trả phí để dùng qua API; gói free sẽ bị 402, xem thông báo lỗi bên dưới).
 	elevenVoiceHaihuoc = "a3AkyqGG4v8Pg7SWQ0Y3" // Ngan — dễ thương, tươi tắn
@@ -90,6 +92,8 @@ func elevenLabsTTS(text, voiceID string) ([]byte, error) {
 	body, _ := json.Marshal(map[string]any{
 		"text":     text,
 		"model_id": elevenModelID,
+		// Ép tiếng Việt: giọng Anh + câu ngắn dễ bị đoán nhầm ngôn ngữ.
+		"language_code": "vi",
 	})
 
 	var lastErr error
