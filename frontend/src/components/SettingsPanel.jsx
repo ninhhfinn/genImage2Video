@@ -1,6 +1,48 @@
+import { useRef, useState } from 'react'
 import TemplatePicker from './TemplatePicker'
 import FontUpload from './FontUpload'
 import MusicPicker from './MusicPicker'
+
+// 9 giọng FPT.AI-VITs (Marketplace) — value gửi thẳng làm voice_id.
+const FPT_VOICES = [
+  ['std_banmai',    'Ban Mai — nữ Bắc'],
+  ['std_thuminh',   'Thu Minh — nữ Bắc'],
+  ['std_kimngan',   'Kim Ngân — nữ'],
+  ['std_hatieumai', 'Hạt Tiêu Mai — nữ'],
+  ['std_ngoclam',   'Ngọc Lam — nữ Huế'],
+  ['std_leminh',    'Lê Minh — nam Bắc'],
+  ['std_giahuy',    'Gia Huy — nam Trung'],
+  ['std_minhquan',  'Minh Quân — nam'],
+  ['std_huyphong',  'Huy Phong — nam'],
+]
+
+// Nút nghe thử giọng: gọi /api/tts-preview (backend cache) rồi phát.
+function VoicePreview({ provider, voice }) {
+  const [busy, setBusy] = useState(false)
+  const audioRef = useRef(null)
+  const play = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const url = `/api/tts-preview?provider=${encodeURIComponent(provider)}&voice=${encodeURIComponent(voice || '')}`
+      const res = await fetch(url)
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        alert('Nghe thử lỗi: ' + (e.error || res.status))
+        return
+      }
+      const blob = await res.blob()
+      if (audioRef.current) audioRef.current.pause()
+      audioRef.current = new Audio(URL.createObjectURL(blob))
+      await audioRef.current.play()
+    } finally { setBusy(false) }
+  }
+  return (
+    <button type="button" className="seg-btn" style={{flex:'0 0 auto'}} onClick={play} disabled={busy}>
+      {busy ? '…' : '▶ Nghe thử'}
+    </button>
+  )
+}
 
 // Section có tiêu đề — chia cột Cài đặt thành các nhóm rõ ràng.
 // Không dùng emoji (mockup duyệt: uppercase teal sạch, letter-spaced).
@@ -65,7 +107,9 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
   const narrationPersona = settings.narrationPersona || 'haihuoc'
   const ttsProvider = settings.ttsProvider || 'google'
   const voiceId = settings.voiceId || ''
+  const subtitleStyle = settings.subtitleStyle || 'karaoke'
   const maxSegments = settings.maxSegments ?? 10
+  const targetDuration = settings.targetDuration ?? 60
   const perImg = Number(duration) || 3
   const titleSecs = Math.max(0.5, Number(titleDuration) || 3)
   const safePhotoLimit = Number(photoLimit) || 12
@@ -206,22 +250,73 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
               ))}
             </div>
 
-            {ttsProvider!=='google' && (
-              <input
-                className="inp body-font"
-                placeholder={ttsProvider==='fpt'
-                  ? 'banmai / lannhi / leminh… (bỏ trống = giọng mặc định)'
-                  : 'Voice ID (bỏ trống = giọng mặc định)'}
-                value={voiceId}
-                onChange={e=>set('voiceId')(e.target.value)}
-                style={{marginBottom:8}}
-              />
-            )}
-            {ttsProvider==='google' && (
-              <div className="hint" style={{marginBottom:8,opacity:0.7}}>
-                🆓 Google đọc tiếng Việt miễn phí, không cần key (giọng máy, hợp thử nhanh).
+            {ttsProvider==='fpt' && (
+              <div style={{display:'flex',gap:6,marginBottom:8}}>
+                <select
+                  className="inp body-font"
+                  value={FPT_VOICES.some(([v])=>v===voiceId) ? voiceId : ''}
+                  onChange={e=>set('voiceId')(e.target.value)}
+                  style={{flex:1}}
+                >
+                  <option value="">Ban Mai — nữ Bắc (mặc định)</option>
+                  {FPT_VOICES.map(([v,l])=>(
+                    <option key={v} value={v}>{l}</option>
+                  ))}
+                </select>
+                <VoicePreview provider="fpt" voice={voiceId}/>
               </div>
             )}
+            {ttsProvider==='elevenlabs' && (
+              <div style={{display:'flex',gap:6,marginBottom:8}}>
+                <input
+                  className="inp body-font"
+                  placeholder="Voice ID (bỏ trống = giọng mặc định)"
+                  value={voiceId}
+                  onChange={e=>set('voiceId')(e.target.value)}
+                  style={{flex:1,marginBottom:0}}
+                />
+                <VoicePreview provider="elevenlabs" voice={voiceId}/>
+              </div>
+            )}
+            {ttsProvider==='google' && (
+              <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:8}}>
+                <div className="hint" style={{flex:1,opacity:0.7}}>
+                  🆓 Google đọc tiếng Việt miễn phí, không cần key (giọng máy, hợp thử nhanh).
+                </div>
+                <VoicePreview provider="google" voice=""/>
+              </div>
+            )}
+            {ttsProvider==='elevenlabs' && (
+              <div className="hint" style={{marginBottom:8,opacity:0.7}}>
+                Thiếu key/hết quota → tự chuyển giọng Google free, video vẫn render.
+              </div>
+            )}
+
+            <label className="flabel" style={{marginBottom:6}}>Kiểu phụ đề</label>
+            <select
+              className="inp body-font"
+              value={subtitleStyle}
+              onChange={e=>set('subtitleStyle')(e.target.value)}
+              style={{width:'100%',marginBottom:6}}
+            >
+              <option value="karaoke">🎤 Karaoke — từ đang đọc phóng to + đổi màu theo template</option>
+              <option value="typewriter">⌨️ Typewriter — gõ chữ từng ký tự, trắng bóng đổ</option>
+            </select>
+            <div className="hint" style={{marginBottom:8,opacity:0.7}}>
+              Khi bật thuyết minh, bảng giá sẽ ẩn — thay bằng tiêu đề hook + phụ đề theo giọng đọc.
+            </div>
+
+            <label className="flabel" style={{marginBottom:6}}>Thời lượng video</label>
+            <div className="seg" style={{marginBottom:8}}>
+              {[[30,'~30s'],[60,'~60s'],[90,'~90s'],[0,'Tự do']].map(([v,l])=>(
+                <button
+                  key={v}
+                  type="button"
+                  className={`seg-btn${targetDuration===v?' on':''}`}
+                  onClick={()=>set('targetDuration')(v)}
+                >{l}</button>
+              ))}
+            </div>
 
             <label className="flabel">
               Số cảnh tối đa &nbsp;
@@ -231,6 +326,11 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
               <input type="range" min="3" max="15" step="1" value={maxSegments} onChange={e=>set('maxSegments')(+e.target.value)}/>
               <span className="slider-val">{maxSegments}</span>
             </div>
+            {targetDuration > 0 && (
+              <div className="hint" style={{marginBottom:4,opacity:0.7}}>
+                ⏱️ Có thể tự giảm bớt cảnh để vừa ~{targetDuration}s.
+              </div>
+            )}
 
             <div style={{marginTop:10}}>
               <MusicPicker

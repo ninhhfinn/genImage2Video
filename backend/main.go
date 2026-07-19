@@ -46,24 +46,24 @@ type Config struct {
 	DryRun        bool
 
 	// Listing overlay (persistent, hiển thị xuyên suốt video)
-	Address      string   // dòng địa chỉ ở đầu video
-	Nickname     string   // text lớn ở giữa (vd "6OIYH")
-	ListingID    string   // ID hiển thị ở cuối
-	Prices       []string // các dòng giá hiển thị giữa video
-	Amenities    []string // tiện nghi (Máy chiếu netflix- Bếp nấu- ...)
-	EffectType   string   // "zoom-in" | "zoom-out" | "move-left-right" | "move-right-left" | "random"
-	EffectTypes  []string // 1 kiểu cố định, hoặc ["random"]: mỗi ảnh random đúng 1 nhóm hiệu ứng
-	OverlayStyle string   // "badge" (Daiky home, brown box) | "bubble" (Sunset, no box, lower-left)
-	OverlayFont  string   // "playfair" | "lilita"
-	OverlayScale float64  // scale chữ overlay
-	OverlayText  string   // màu chữ nội dung (address/prices/amenities/listing_id)
-	OverlayBG    string   // màu nền badge
-	OverlayStroke string  // màu viền bubble/title (legacy → shadow)
-	TitleColor   string   // màu chữ tiêu đề (title/nickname)
-	StrokeColor  string   // màu viền chữ tiêu đề (stroke outline), vd sunset
-	TitleBg      string   // màu nền pill tiêu đề (title/nickname)
-	BodyBg       string   // màu nền pill nội dung (address/prices/amenities)
-	GridIntro    bool     // chèn 1 frame lưới 2x2 tĩnh ở đầu video rồi về Ken Burns
+	Address       string   // dòng địa chỉ ở đầu video
+	Nickname      string   // text lớn ở giữa (vd "6OIYH")
+	ListingID     string   // ID hiển thị ở cuối
+	Prices        []string // các dòng giá hiển thị giữa video
+	Amenities     []string // tiện nghi (Máy chiếu netflix- Bếp nấu- ...)
+	EffectType    string   // "zoom-in" | "zoom-out" | "move-left-right" | "move-right-left" | "random"
+	EffectTypes   []string // 1 kiểu cố định, hoặc ["random"]: mỗi ảnh random đúng 1 nhóm hiệu ứng
+	OverlayStyle  string   // "badge" (Daiky home, brown box) | "bubble" (Sunset, no box, lower-left)
+	OverlayFont   string   // "playfair" | "lilita"
+	OverlayScale  float64  // scale chữ overlay
+	OverlayText   string   // màu chữ nội dung (address/prices/amenities/listing_id)
+	OverlayBG     string   // màu nền badge
+	OverlayStroke string   // màu viền bubble/title (legacy → shadow)
+	TitleColor    string   // màu chữ tiêu đề (title/nickname)
+	StrokeColor   string   // màu viền chữ tiêu đề (stroke outline), vd sunset
+	TitleBg       string   // màu nền pill tiêu đề (title/nickname)
+	BodyBg        string   // màu nền pill nội dung (address/prices/amenities)
+	GridIntro     bool     // chèn 1 frame lưới 2x2 tĩnh ở đầu video rồi về Ken Burns
 
 	// Template system (mới — thay thế OverlayStyle dần)
 	Template     string                              // "daiky" | "sunset"
@@ -81,6 +81,13 @@ type Config struct {
 	TTSProvider      string // "google" | "elevenlabs" | "fpt"
 	VoiceID          string // voice id/name cho provider; "" → mặc định env
 	MaxSegments      int    // số cảnh tối đa (3–15); 0 → 10
+	TargetDuration   int    // narrated: thời lượng mục tiêu (giây); 0 → không giới hạn
+	SubtitleStyle    string // narrated: "karaoke" (mặc định) | "typewriter"
+
+	// Kịch bản do user duyệt/sửa từ panel FE (nil = để Claude viết).
+	Script *NarrationScript
+	// ForceScript: bỏ qua cache kịch bản (nút "Viết lại" trong panel FE).
+	ForceScript bool
 }
 
 var supportedExts = map[string]bool{
@@ -454,6 +461,8 @@ func parseFlags() Config {
 	flag.StringVar(&cfg.TTSProvider, "tts-provider", "google", "narrated: google | elevenlabs | fpt")
 	flag.StringVar(&cfg.VoiceID, "voice-id", "", "narrated: voice id/name (bỏ trống = mặc định)")
 	flag.IntVar(&cfg.MaxSegments, "max-segments", 10, "narrated: số cảnh tối đa (3–15)")
+	flag.IntVar(&cfg.TargetDuration, "target-duration", 60, "narrated: thời lượng mục tiêu giây (0 = không giới hạn)")
+	flag.StringVar(&cfg.SubtitleStyle, "subtitle-style", "karaoke", "narrated: karaoke | typewriter")
 	flag.Usage = printUsage
 	flag.Parse()
 	if cfg.Input == "" {

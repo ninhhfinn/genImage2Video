@@ -4,6 +4,7 @@ import { useToast }   from './hooks/useToast'
 import { useRender }  from './hooks/useRender'
 import SourcePanel    from './components/SourcePanel'
 import SettingsPanel  from './components/SettingsPanel'
+import ScriptPanel    from './components/ScriptPanel'
 import { RenderPanel, HistoryPanel, ThumbnailHistoryPanel } from './components/RenderPanel'
 import { selectListing, renderThumbnail } from './api/client'
 
@@ -41,9 +42,11 @@ const DEFAULT_SETTINGS = {
   // ── Thuyết minh AI (cờ độc lập settings.narrate, ghép với motion mode) ──
   narrate: false,                // bật thuyết minh AI (giọng đọc + phụ đề + nhạc)
   narrationPersona: 'haihuoc',   // 'haihuoc' hài hước | 'lichsu' lịch sự
+  subtitleStyle: 'karaoke',      // kiểu phụ đề: 'karaoke' | 'typewriter'
   ttsProvider: 'google',         // 'google' (free, không cần key) | 'elevenlabs' | 'fpt'
   voiceId: '',                   // voice id/name theo provider; '' = giọng mặc định
   maxSegments: 10,               // số cảnh tối đa 3..15
+  targetDuration: 60,            // thời lượng mục tiêu giây; 0 = không giới hạn
   music: '',                     // tên file nhạc nền từ GET /api/music; '' = không nhạc
 
   // ── Tự đăng social qua webhook (Make.com / n8n) ──
@@ -116,6 +119,17 @@ export default function App() {
   const [thumbBusy, setThumbBusy] = useState(false)
   const [thumbErr, setThumbErr]   = useState('')
 
+  // Kịch bản thuyết minh user đã duyệt/sửa từ ScriptPanel ({segments:[...]})
+  // — gửi kèm request render để backend dùng đúng bản này thay vì gọi Claude.
+  const [approvedScript, setApprovedScript] = useState(null)
+  // Đổi listing/ảnh/persona/thời lượng/giá/tiện nghi... → bản đã duyệt hết khớp,
+  // phải bỏ (giá & tiện nghi nuôi hook + kịch bản; đổi mà giữ bản cũ sẽ lệch).
+  useEffect(() => { setApprovedScript(null) }, [
+    activeListing?.id, uploadedCount, settings.narrationPersona,
+    settings.maxSegments, settings.targetDuration, settings.ttsProvider,
+    JSON.stringify(settings.overlayPriceTypes), settings.amenitiesText,
+  ])
+
   const [queue, setQueue]   = useState([])
   const queueIdxRef = useRef(-1)
   const queueRef = useRef([])
@@ -171,13 +185,17 @@ export default function App() {
       // staycation/creampill = số đầy đủ. Backend dựng sẵn price_lines_by_template[template].
       // Thiếu (template không phải video) → rơi về price_line_items/price_lines như cũ.
       const perTemplate = listing.price_lines_by_template?.[template]
-      const priceLines = perTemplate?.length
-        ? perTemplate
-        : listing.price_line_items?.length
-          ? listing.price_line_items
-              .filter(item => !selectedPriceTypes || selectedPriceTypes.has(item.key))
-              .map(item => item.text)
-          : listing.price_lines || []
+      const canonicalLines = listing.price_line_items?.length
+        ? listing.price_line_items
+            .filter(item => !selectedPriceTypes || selectedPriceTypes.has(item.key))
+            .map(item => item.text)
+        : listing.price_lines || []
+      // Thuyết minh AI: bảng giá overlay đã ẩn nên prices CHỈ nuôi kịch bản/hook
+      // → gửi bản canonical (đủ "N giờ đầu", số chuẩn "199.000 đ") thay vì format
+      // template ("189 cá", số trần "359") kẻo Claude viết sai số giờ/đơn vị lên hook.
+      const priceLines = narrate
+        ? canonicalLines
+        : (perTemplate?.length ? perTemplate : canonicalLines)
       cfg.address       = listing.address    || ''
       cfg.nickname      = listing.nickname   || listing.name || ''
       cfg.listing_id    = listing.id         || ''
@@ -207,7 +225,12 @@ export default function App() {
       cfg.tts_provider      = settings.ttsProvider
       cfg.voice_id          = settings.voiceId
       cfg.max_segments      = settings.maxSegments
+      cfg.target_duration   = Number(settings.targetDuration ?? 60) || 0
       cfg.music             = settings.music
+      cfg.subtitle_style    = settings.subtitleStyle || 'karaoke'
+      // Kịch bản đã duyệt/sửa từ ScriptPanel — chỉ render lẻ (batch mỗi listing
+      // một kịch bản riêng nên không dùng chung được).
+      if (!batch && approvedScript) cfg.script = approvedScript
     }
     // Tự đăng social: render xong backend gửi video tới webhook
     if (settings.autoPost && (settings.webhookUrl || '').trim()) {
@@ -221,7 +244,26 @@ export default function App() {
       }
     }
     return cfg
-  }, [settings])
+  }, [settings, approvedScript])
+
+  // ── Request cho POST /api/script (ScriptPanel) — lấy đúng dữ liệu listing như
+  // lúc render (cùng prices/amenities) để cache kịch bản trùng khớp, render sau
+  // preview không gọi Claude lần hai. ──
+  const buildScriptReq = useCallback(() => {
+    const c = buildRenderCfg(activeListing)
+    return {
+      narration_persona: c.narration_persona || settings.narrationPersona,
+      tts_provider:      c.tts_provider      || settings.ttsProvider,
+      subtitle_style:    c.subtitle_style    || settings.subtitleStyle || 'karaoke',
+      max_segments:      c.max_segments      || settings.maxSegments,
+      target_duration:   c.target_duration ?? (Number(settings.targetDuration ?? 60) || 0),
+      nickname:          c.nickname   || '',
+      address:           c.address    || '',
+      listing_id:        c.listing_id || '',
+      prices:            c.prices     || [],
+      amenities:         c.amenities  || [],
+    }
+  }, [buildRenderCfg, activeListing, settings])
 
   // ── Build cfg gửi API render-thumbnail ──
   const buildThumbnailCfg = useCallback((listing, { batch = false } = {}) => {
@@ -532,6 +574,15 @@ export default function App() {
             <span className="phint">video + thumbnail + lịch sử</span>
           </div>
           <div className="pbody pbody-flush">
+            {settings.narrate && !isQueueMode && (
+              <ScriptPanel
+                buildScriptReq={buildScriptReq}
+                canFetch={uploadedCount > 0}
+                approvedScript={approvedScript}
+                onApprove={setApprovedScript}
+                toast={toast}
+              />
+            )}
             <RenderPanel
               canRender={uploadedCount>0 || pendingCount>0}
               onRender={handleRender}

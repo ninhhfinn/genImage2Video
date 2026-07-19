@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ─── Unit test thuần cho timeline (không cần API/ffmpeg) ────────────────────
@@ -80,6 +81,7 @@ func TestComputeNarratedTimeline(t *testing.T) {
 // buildNarrated → runFFmpeg và kiểm tra output là A/V hợp lệ.
 
 func TestGenNarratedVideo(t *testing.T) {
+	isolateScriptLib(t)
 	if os.Getenv("GENNARRATED") == "" {
 		t.Skip("đặt GENNARRATED=1 để chạy end-to-end narrated")
 	}
@@ -154,6 +156,7 @@ func TestGenNarratedVideo(t *testing.T) {
 // TestNarratedMusicDucking chạy buildNarrated CÓ nhạc nền → xác minh graph
 // sidechaincompress hoạt động qua đúng code path (không chỉ test rời).
 func TestNarratedMusicDucking(t *testing.T) {
+	isolateScriptLib(t)
 	if os.Getenv("GENNARRATED") == "" {
 		t.Skip("đặt GENNARRATED=1")
 	}
@@ -211,6 +214,7 @@ func TestNarratedMusicDucking(t *testing.T) {
 
 // TestNarratedEdgeCases phủ n==1 và caption rỗng (captionPlans lệch số với ảnh).
 func TestNarratedEdgeCases(t *testing.T) {
+	isolateScriptLib(t)
 	if os.Getenv("GENNARRATED") == "" {
 		t.Skip("đặt GENNARRATED=1")
 	}
@@ -293,16 +297,20 @@ func TestNarratedRealClaude(t *testing.T) {
 	}
 	cfg := Config{
 		NarrationPersona: "haihuoc",
+		ListingID:        "real-claude-test",
 		Nickname:         "Homestay Test",
 		Address:          "Thanh Xuân, Hà Nội",
 		Prices:           []string{"Giá giờ: 199K/2H", "Qua đêm: 519K"},
 		Amenities:        []string{"Máy chiếu", "Bếp nấu", "Ban công"},
+		TargetDuration:   60,
 	}
+	t.Logf("🎯 Công thức hook được giao: %s", pickHookFormula(cfg.ListingID))
 	script, err := claudeCodeScript(cfg, imgs)
 	if err != nil {
 		t.Fatalf("claudeCodeScript thật lỗi: %v", err)
 	}
-	script = validateScript(script, len(imgs))
+	_, wordBudget := narrationBudget(float64(cfg.TargetDuration), len(imgs), cfg.TTSProvider)
+	script = validateScript(script, len(imgs), wordBudget, cfg.Nickname)
 	if len(script.Segments) == 0 {
 		t.Fatalf("Claude không trả segment nào")
 	}
@@ -310,15 +318,72 @@ func TestNarratedRealClaude(t *testing.T) {
 		if strings.TrimSpace(seg.Narration) == "" {
 			t.Fatalf("segment %d thiếu narration", i)
 		}
-		t.Logf("cảnh %d [%s]: %s", seg.ImageIndex, seg.Caption, seg.Narration)
+		t.Logf("cảnh %d [%s] (%d từ): %s", seg.ImageIndex, seg.Caption, len(strings.Fields(seg.Narration)), seg.Narration)
 	}
-	t.Logf("✅ Claude Code thật trả %d cảnh hợp lệ", len(script.Segments))
+	// Soft-check phong cách v3: mở bằng "Chào các con vợ" + có TÊN căn hộ,
+	// không kêu lưu/tải video.
+	first := script.Segments[0].Narration
+	if !strings.HasPrefix(first, "Chào các con vợ") {
+		t.Logf("⚠️  đoạn đầu KHÔNG mở bằng 'Chào các con vợ': %s", firstN(first, 80))
+	} else {
+		t.Logf("✅ đoạn đầu mở đúng 'Chào các con vợ'")
+	}
+	if !strings.Contains(first, cfg.Nickname) {
+		t.Logf("⚠️  đoạn đầu KHÔNG nhắc tên căn hộ %q: %s", cfg.Nickname, firstN(first, 80))
+	} else {
+		t.Logf("✅ đoạn đầu có tên căn hộ %q", cfg.Nickname)
+	}
+	all := strings.ToLower(func() string {
+		var b strings.Builder
+		for _, seg := range script.Segments {
+			b.WriteString(seg.Narration + " ")
+		}
+		return b.String()
+	}())
+	if strings.Contains(all, "lưu video") || strings.Contains(all, "tải video") || strings.Contains(all, "lưu lại video") {
+		t.Errorf("❌ kịch bản vẫn kêu lưu/tải video — CTA phải về căn hộ")
+	} else {
+		t.Logf("✅ không có 'lưu/tải video' trong kịch bản")
+	}
+	// Checklist v4: câu hook mở đầu phải ngắn (guideline ≤15 từ, du di 20).
+	if hw := len(strings.Fields(firstSentence(first))); hw > 20 {
+		t.Logf("⚠️  câu hook mở đầu dài %d từ (khuyến nghị ≤ 15): %s", hw, firstN(firstSentence(first), 120))
+	} else {
+		t.Logf("✅ câu hook mở đầu gọn (%d từ)", len(strings.Fields(firstSentence(first))))
+	}
+	// Checklist v4: đoạn cuối phải là CTA về căn hộ.
+	last := strings.ToLower(script.Segments[len(script.Segments)-1].Narration)
+	ctaWords := []string{"đặt phòng", "inbox", "chốt", "nhắn", "ghé", "giữ phòng", "book"}
+	hasCTA := false
+	for _, w := range ctaWords {
+		if strings.Contains(last, w) {
+			hasCTA = true
+			break
+		}
+	}
+	if !hasCTA {
+		t.Logf("⚠️  đoạn cuối chưa thấy lời kêu gọi hành động rõ: %s", firstN(last, 120))
+	} else {
+		t.Logf("✅ đoạn cuối có CTA về căn hộ")
+	}
+	// Checklist v5: hook title 2 dòng hiện trên màn hình (ĐƯỢC dùng chữ số).
+	t.Logf("📌 hook_line1=%q hook_line2=%q emphasis=%q", script.HookLine1, script.HookLine2, script.HookEmphasis)
+	if strings.TrimSpace(script.HookLine1) == "" && strings.TrimSpace(script.HookLine2) == "" {
+		t.Errorf("❌ v5: Claude không trả hook_line nào (sẽ rơi về composeHookTitle)")
+	}
+	for _, l := range []string{script.HookLine1, script.HookLine2} {
+		if n := len([]rune(l)); n > 28 {
+			t.Errorf("❌ hook line dài %d rune (>28 sau validate): %q", n, l)
+		}
+	}
+	t.Logf("✅ Claude Code thật trả %d cảnh hợp lệ (budget %d từ/đoạn)", len(script.Segments), wordBudget)
 }
 
 // TestNarratedGoogleLive dựng video THẬT với giọng Google (miễn phí, không key):
 // stub kịch bản (đỡ tốn Claude + xác định), nhưng TTS là Google THẬT → chứng minh
 // giọng thật hoạt động end-to-end. Xuất file ra path cố định để mở nghe.
 func TestNarratedGoogleLive(t *testing.T) {
+	isolateScriptLib(t)
 	if os.Getenv("GENNARRATED_LIVE") == "" {
 		t.Skip("đặt GENNARRATED_LIVE=1 để render video giọng Google thật")
 	}
@@ -334,19 +399,33 @@ func TestNarratedGoogleLive(t *testing.T) {
 	origScript := genScript
 	defer func() { genScript = origScript }()
 	genScript = func(cfg Config, images []string) (*NarrationScript, error) {
-		return &NarrationScript{Segments: []NarrationSegment{
-			{ImageIndex: 0, Caption: "Tông cam ấm", Narration: "Chào các con vợ, mở màn là tông cam ấm áp cực kỳ chill nha."},
-			{ImageIndex: 1, Caption: "Góc xanh mát", Narration: "Tiếp theo là mảng xanh mát rượi, nhìn thôi đã thấy thư giãn rồi."},
-			{ImageIndex: 2, Caption: "Sắc tím mộng mơ", Narration: "Cuối cùng là sắc tím mộng mơ, nhớ lưu video lại đặt phòng nha các con vợ."},
-		}}, nil
+		return &NarrationScript{
+			Segments: []NarrationSegment{
+				{ImageIndex: 0, Caption: "Tông cam ấm", Narration: "Chào các con vợ, mở màn là tông cam ấm áp cực kỳ chill nha."},
+				{ImageIndex: 1, Caption: "Góc xanh mát", Narration: "Tiếp theo là mảng xanh mát rượi, nhìn thôi đã thấy thư giãn rồi."},
+				{ImageIndex: 2, Caption: "Sắc tím mộng mơ", Narration: "Cuối cùng là sắc tím mộng mơ, nhớ lưu video lại đặt phòng nha các con vợ."},
+			},
+			HookLine1:    "Căn hộ Camellia xinh xỉu",
+			HookLine2:    "Chỉ 199k/2 người",
+			HookEmphasis: "199k/2 người",
+		}, nil
 	}
 	// synthTTS THẬT (không stub) — provider google.
+	// GENNARRATED_STYLE=typewriter để xem kiểu phụ đề thứ 2 (mặc định karaoke).
+	style := normalizeSubtitleStyle(os.Getenv("GENNARRATED_STYLE"))
 
-	out := filepath.Join(os.TempDir(), "narrated_google_demo.mp4")
+	out := filepath.Join(os.TempDir(), "narrated_google_demo_"+style+".mp4")
 	cfg := Config{
 		Mode: "narrated", Output: out,
 		Width: 1080, Height: 1920, FPS: 30, ZoomIntensity: 0.4,
 		TTSProvider: "google", NarrationPersona: "haihuoc", MaxSegments: 10,
+		TargetDuration: 60,
+		Template:       "amorex", // accent hồng như video mẫu ocean
+		Nickname:       "Camellia",
+		Prices:         []string{"Khung 2h: 199k", "Qua đêm: 350.000đ"},
+		Amenities:      []string{"Máy chiếu Netflix", "Bồn tắm"},
+		Watermark:      "@dayladau.com",
+		SubtitleStyle:  style,
 	}
 	args, err := buildNarrated(cfg, imgs)
 	if err != nil {
@@ -366,6 +445,58 @@ func TestNarratedGoogleLive(t *testing.T) {
 	dur, _ := audioDurationSec(out)
 	t.Logf("✅ VIDEO GIỌNG THẬT (Google, free): %s", out)
 	t.Logf("   độ dài %.1fs · mean volume %.1f dB (không câm = có giọng thật)", dur, mv)
+}
+
+// TestNarratedFPTLive dựng video THẬT với giọng FPT.AI (cần FPT_TTS_API_KEY):
+// stub kịch bản, TTS là FPT THẬT → chứng minh key + giọng banmai chạy end-to-end.
+func TestNarratedFPTLive(t *testing.T) {
+	isolateScriptLib(t)
+	if os.Getenv("GENNARRATED_FPT") == "" {
+		t.Skip("đặt GENNARRATED_FPT=1 (+ FPT_TTS_API_KEY) để render video giọng FPT thật")
+	}
+	if os.Getenv("FPT_TTS_API_KEY") == "" {
+		t.Skip("thiếu FPT_TTS_API_KEY")
+	}
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("không có ffmpeg")
+	}
+	tmp := t.TempDir()
+	imgs := []string{
+		makeColorImage(t, tmp, "0", "0xC97B3C", 1200, 800),
+		makeColorImage(t, tmp, "1", "0x3C8C6E", 800, 1200),
+	}
+	origScript := genScript
+	defer func() { genScript = origScript }()
+	genScript = func(cfg Config, images []string) (*NarrationScript, error) {
+		return &NarrationScript{Segments: []NarrationSegment{
+			{ImageIndex: 0, Caption: "Mở màn", Narration: "Chào các con vợ nhé, hôm nay tôi giới thiệu căn homestay xinh xỉu này."},
+			{ImageIndex: 1, Caption: "Chốt đơn", Narration: "Ưng thì inbox tôi giữ phòng liền tay kẻo con vợ khác nẫng mất nha."},
+		}}, nil
+	}
+	out := filepath.Join(os.TempDir(), "narrated_fpt_demo.mp4")
+	cfg := Config{
+		Mode: "narrated", Output: out,
+		Width: 1080, Height: 1920, FPS: 30, ZoomIntensity: 0.4,
+		TTSProvider: "fpt", VoiceID: "banmai", NarrationPersona: "haihuoc",
+		MaxSegments: 10, TargetDuration: 60,
+	}
+	args, err := buildNarrated(cfg, imgs)
+	if err != nil {
+		t.Fatalf("buildNarrated (fpt): %v", err)
+	}
+	if err := runFFmpeg(args, cfg); err != nil {
+		t.Fatalf("runFFmpeg (fpt): %v", err)
+	}
+	if !hasStream(t, out, "audio") || !hasStream(t, out, "video") {
+		t.Fatalf("output thiếu stream")
+	}
+	mv := meanVolumeDB(t, out)
+	if mv <= -50 {
+		t.Fatalf("audio có vẻ câm (mean volume %.1f dB)", mv)
+	}
+	dur, _ := audioDurationSec(out)
+	t.Logf("✅ VIDEO GIỌNG FPT THẬT (banmai): %s", out)
+	t.Logf("   độ dài %.1fs · mean volume %.1f dB", dur, mv)
 }
 
 // meanVolumeDB đọc mean_volume của track audio bằng ffmpeg volumedetect.
@@ -424,4 +555,147 @@ func hasStream(t *testing.T, path, kind string) bool {
 		return false
 	}
 	return len(out) > 0
+}
+
+// ─── Unit tests: thời lượng mục tiêu + fallback giọng free ──────────────────
+
+func TestNarrationBudget(t *testing.T) {
+	cases := []struct {
+		target    float64
+		n         int
+		provider  string
+		wantN     int
+		wantWords int
+	}{
+		{60, 10, "google", 8, 13},      // google đọc chậm (2.2 từ/s) → 8 cảnh · 13 từ ≈ 57s
+		{60, 15, "fpt", 12, 13},        // fpt nhanh (~3.6 từ/s đo thật) → 12 cảnh
+		{60, 15, "elevenlabs", 10, 13}, // elevenlabs (George đọc VN ~2.8 từ/s) → 10 cảnh
+		{30, 10, "google", 4, 13},      // 30s giọng google chỉ đủ 4 cảnh
+		{0, 10, "google", 10, 0},       // 0 = tắt giới hạn
+		{2, 5, "google", 1, 10},        // target tí hon: tối thiểu 1 cảnh, sàn 10 từ
+	}
+	for _, c := range cases {
+		gotN, gotW := narrationBudget(c.target, c.n, c.provider)
+		if gotN != c.wantN || gotW != c.wantWords {
+			t.Errorf("narrationBudget(%.0f, %d, %s) = (%d, %d), want (%d, %d)",
+				c.target, c.n, c.provider, gotN, gotW, c.wantN, c.wantWords)
+		}
+	}
+	// Provider rỗng = google (giọng free mặc định).
+	if r := narrationRate(""); r != narrationRate("google") {
+		t.Errorf("provider rỗng phải cùng rate với google")
+	}
+}
+
+func TestNarratePreflightNoElevenKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "dummy") // qua bước check nguồn Claude
+	t.Setenv("ELEVENLABS_API_KEY", "")
+	t.Setenv("FPT_TTS_API_KEY", "")
+
+	// ElevenLabs thiếu key: KHÔNG chặn nữa (tự fallback Google free khi synth).
+	if err := narratePreflight(Config{TTSProvider: "elevenlabs"}); err != nil {
+		t.Errorf("elevenlabs thiếu key phải qua preflight (fallback google), got: %v", err)
+	}
+	// FPT thiếu key: vẫn lỗi cứng (không có fallback cho FPT).
+	if err := narratePreflight(Config{TTSProvider: "fpt"}); err == nil {
+		t.Errorf("fpt thiếu key phải bị chặn ở preflight")
+	}
+	// Google: luôn qua.
+	if err := narratePreflight(Config{TTSProvider: "google"}); err != nil {
+		t.Errorf("google không cần key, got: %v", err)
+	}
+}
+
+func TestScriptCacheKeyVersion(t *testing.T) {
+	isolateScriptLib(t)
+	cfg := Config{ListingID: "L1", NarrationPersona: "haihuoc", Nickname: "Test"}
+	hashes := []string{"aaa", "bbb"}
+
+	k1 := scriptCacheKey(cfg, hashes)
+	if k2 := scriptCacheKey(cfg, hashes); k2 != k1 {
+		t.Errorf("cùng config phải cùng key: %s != %s", k1, k2)
+	}
+	cfg60 := cfg
+	cfg60.TargetDuration = 60
+	if k3 := scriptCacheKey(cfg60, hashes); k3 == k1 {
+		t.Errorf("đổi TargetDuration phải đổi key (kịch bản khác word budget)")
+	}
+	// Đổi provider (khi có TargetDuration) → word budget khác → key khác.
+	cfgFPT := cfg60
+	cfgFPT.TTSProvider = "fpt"
+	if k4 := scriptCacheKey(cfgFPT, hashes); k4 == scriptCacheKey(cfg60, hashes) {
+		t.Errorf("đổi TTSProvider (google→fpt) phải đổi key (word budget khác)")
+	}
+	if narrationPromptVersion == "v1" || narrationPromptVersion == "v2" || narrationPromptVersion == "v3" {
+		t.Errorf("narrationPromptVersion phải được bump sau khi sửa prompt, đang là %q", narrationPromptVersion)
+	}
+}
+
+// TestTTSProviderFallback: ElevenLabs không dùng được → synthSegments tự chuyển
+// giọng Google free thay vì chết render. Cần ffmpeg/ffprobe (đo mp3), không mạng.
+func TestTTSProviderFallback(t *testing.T) {
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("không có ffprobe")
+	}
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("không có ffmpeg")
+	}
+	tmp := t.TempDir()
+	uniq := fmt.Sprintf("%s %d", t.Name(), time.Now().UnixNano())
+
+	origTTS := synthTTS
+	defer func() { synthTTS = origTTS }()
+
+	t.Run("thiếu key → google ngay từ đầu", func(t *testing.T) {
+		t.Setenv("ELEVENLABS_API_KEY", "")
+		var providers []string
+		synthTTS = func(cfg Config, text string) ([]byte, error) {
+			providers = append(providers, cfg.TTSProvider)
+			return silentMP3(t, tmp, 1.0), nil
+		}
+		script := &NarrationScript{Segments: []NarrationSegment{
+			{ImageIndex: 0, Narration: "cảnh một " + uniq},
+			{ImageIndex: 1, Narration: "cảnh hai " + uniq},
+		}}
+		_, durs, err := synthSegments(Config{TTSProvider: "elevenlabs"}, script)
+		if err != nil {
+			t.Fatalf("synthSegments phải fallback google, got: %v", err)
+		}
+		if len(durs) != 2 {
+			t.Fatalf("thiếu durations: %v", durs)
+		}
+		for _, p := range providers {
+			if p != "google" {
+				t.Errorf("phải synth bằng google, got %q (calls: %v)", p, providers)
+			}
+		}
+	})
+
+	t.Run("hết quota giữa chừng → chuyển google từ cảnh lỗi", func(t *testing.T) {
+		t.Setenv("ELEVENLABS_API_KEY", "dummy-key")
+		var providers []string
+		synthTTS = func(cfg Config, text string) ([]byte, error) {
+			providers = append(providers, cfg.TTSProvider)
+			if cfg.TTSProvider == "elevenlabs" {
+				return nil, fmt.Errorf("ElevenLabs HTTP 401: %w", errElevenUnusable)
+			}
+			return silentMP3(t, tmp, 1.0), nil
+		}
+		script := &NarrationScript{Segments: []NarrationSegment{
+			{ImageIndex: 0, Narration: "quota một " + uniq},
+			{ImageIndex: 1, Narration: "quota hai " + uniq},
+		}}
+		_, durs, err := synthSegments(Config{TTSProvider: "elevenlabs"}, script)
+		if err != nil {
+			t.Fatalf("synthSegments phải fallback google sau lỗi quota, got: %v", err)
+		}
+		if len(durs) != 2 || durs[0] <= 0 || durs[1] <= 0 {
+			t.Fatalf("durations bất thường: %v", durs)
+		}
+		// Cảnh 1: thử elevenlabs (lỗi) → google; cảnh 2: đi thẳng google.
+		want := []string{"elevenlabs", "google", "google"}
+		if strings.Join(providers, ",") != strings.Join(want, ",") {
+			t.Errorf("thứ tự provider = %v, want %v", providers, want)
+		}
+	})
 }

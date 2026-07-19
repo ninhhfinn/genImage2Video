@@ -139,6 +139,42 @@ func renderTextOverlays(cfg Config, tmpDir string) ([]OverlayPlan, error) {
 	return plans, nil
 }
 
+// renderWatermarkPlan vẽ RIÊNG watermark nhỏ (narrated ẩn toàn bộ template
+// overlay/bảng giá nhưng vẫn giữ nhận diện kênh). Y 0.90 — nằm DƯỚI dòng
+// karaoke 83%, trên progress bar TikTok. Trả (nil, nil) khi không có watermark.
+func renderWatermarkPlan(cfg Config, tmpDir string) (*OverlayPlan, error) {
+	text := strings.TrimSpace(cfg.Watermark)
+	if text == "" {
+		return nil, nil
+	}
+	ctx := &textrender.RenderContext{
+		VideoWidth:  cfg.Width,
+		VideoHeight: cfg.Height,
+		AssetsDir:   assetsDir(),
+	}
+	style := &textrender.ElementStyle{
+		Text:     text,
+		FontFile: "BeVietnamPro-Regular.ttf",
+		SizePct:  0.02,
+		Color:    "#FFFFFF",
+		Shadow: &textrender.ShadowStyle{
+			Color: "#000000", Alpha: 0.6, Blur: 4, OffsetX: 1, OffsetY: 1,
+		},
+		Position: textrender.Position{X: "center", Y: "0.90"},
+		Align:    "center",
+		NoWrap:   true,
+	}
+	out, err := textrender.Render(style, ctx)
+	if err != nil || out == nil {
+		return nil, err
+	}
+	path := filepath.Join(tmpDir, "watermark.png")
+	if err := out.Save(path); err != nil {
+		return nil, err
+	}
+	return &OverlayPlan{PNGPath: path, X: out.X, Y: out.Y}, nil
+}
+
 // listingText resolves the display text for a stack item key.
 func listingText(key string, cfg Config) string {
 	switch key {
@@ -427,8 +463,8 @@ func assetsTemplatesDir() string {
 // Keys touched:
 //   - "title"                                  : TextFont / TextScale / TextColor
 //   - "address","nickname","prices","amenities","listing_id" :
-//       OverlayFont / OverlayScale / OverlayText, plus OverlayStyle → Bg toggle,
-//       OverlayBG → Bg.Color, OverlayStroke → Shadow.Color (bubble stroke proxy).
+//     OverlayFont / OverlayScale / OverlayText, plus OverlayStyle → Bg toggle,
+//     OverlayBG → Bg.Color, OverlayStroke → Shadow.Color (bubble stroke proxy).
 //   - "watermark"                              : color from TextColor
 func applyConfigOverrides(tmpl *textrender.Template, cfg Config) {
 	if tmpl == nil || tmpl.Elements == nil {

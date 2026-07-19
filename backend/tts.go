@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,9 +38,10 @@ const (
 var synthTTS = ttsSynthesize
 
 // ttsSynthesize tạo mp3 cho 1 đoạn text theo provider đã chọn.
+// Provider rỗng → Google free (không cần key), tránh chết render vì thiếu key.
 func ttsSynthesize(cfg Config, text string) ([]byte, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.TTSProvider)) {
-	case "google", "free":
+	case "", "google", "free":
 		return googleTTS(text)
 	case "fpt":
 		return fptTTS(text, resolveVoiceID(cfg))
@@ -50,7 +52,7 @@ func ttsSynthesize(cfg Config, text string) ([]byte, error) {
 
 // resolveVoiceID: cfg.VoiceID → env → default theo provider.
 func resolveVoiceID(cfg Config) string {
-	if p := strings.ToLower(strings.TrimSpace(cfg.TTSProvider)); p == "google" || p == "free" {
+	if p := strings.ToLower(strings.TrimSpace(cfg.TTSProvider)); p == "" || p == "google" || p == "free" {
 		return "vi" // Google TTS không dùng voice id
 	}
 	if v := strings.TrimSpace(cfg.VoiceID); v != "" {
@@ -74,10 +76,15 @@ func resolveVoiceID(cfg Config) string {
 
 // ─── ElevenLabs ─────────────────────────────────────────────────────────────
 
+// errElevenUnusable đánh dấu lỗi "ElevenLabs không dùng được" (thiếu key, sai
+// key, hết quota, gói free) — synthSegments bắt lỗi này để tự chuyển sang
+// giọng Google free. Lỗi tạm (5xx/mạng) KHÔNG wrap để không trộn giọng vô cớ.
+var errElevenUnusable = errors.New("ElevenLabs không dùng được")
+
 func elevenLabsTTS(text, voiceID string) ([]byte, error) {
 	key := strings.TrimSpace(os.Getenv("ELEVENLABS_API_KEY"))
 	if key == "" {
-		return nil, fmt.Errorf("thiếu ELEVENLABS_API_KEY")
+		return nil, fmt.Errorf("thiếu ELEVENLABS_API_KEY: %w", errElevenUnusable)
 	}
 	endpoint := fmt.Sprintf("https://api.elevenlabs.io/v1/text-to-speech/%s?output_format=mp3_44100_128", url.PathEscape(voiceID))
 	body, _ := json.Marshal(map[string]any{
@@ -110,25 +117,43 @@ func elevenLabsTTS(text, voiceID string) ([]byte, error) {
 		}
 		// Gói free ElevenLabs không dùng được giọng thư viện qua API → báo rõ ràng.
 		if resp.StatusCode == 402 || strings.Contains(string(data), "paid_plan_required") {
-			return nil, fmt.Errorf("Gói ElevenLabs free không dùng được giọng thư viện qua API. Cách xử lý: (1) nâng cấp ElevenLabs (Starter ~$5/tháng), HOẶC (2) tự clone 1 giọng riêng rồi điền Voice ID của giọng đó, HOẶC (3) đổi sang FPT.AI trong phần cài đặt")
+			return nil, fmt.Errorf("Gói ElevenLabs free không dùng được giọng thư viện qua API (nâng cấp Starter ~$5/tháng hoặc clone giọng riêng rồi điền Voice ID): %w", errElevenUnusable)
 		}
 		lastErr = fmt.Errorf("ElevenLabs HTTP %d: %s", resp.StatusCode, firstN(string(data), 200))
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 429 {
-			break // lỗi client (sai key/voice) — không retry
+		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			return nil, fmt.Errorf("%v: %w", lastErr, errElevenUnusable) // key sai/hết hạn
 		}
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 429 {
+			break // lỗi client khác (vd sai voice) — không retry
+		}
+	}
+	if lastErr != nil && strings.Contains(lastErr.Error(), "HTTP 429") {
+		return nil, fmt.Errorf("%v: %w", lastErr, errElevenUnusable) // hết quota sau khi retry
 	}
 	return nil, lastErr
 }
 
 // ─── FPT.AI ─────────────────────────────────────────────────────────────────
 
+// fptRateWaits: gói FPT free giới hạn tần suất theo phút → khi dính HTTP 429
+// chờ lâu dần rồi thử lại (không tính vào ttsMaxAttempts). Tổng chờ tối đa ~2.5'.
+var fptRateWaits = []time.Duration{15 * time.Second, 30 * time.Second, 45 * time.Second, 60 * time.Second}
+
+// fptTTS: 2 nền tảng FPT, tự nhận theo dạng key:
+//   - key "sk-..." → FPT AI Marketplace (mkp-api.fptcloud.com, OpenAI-compatible,
+//     model FPT.AI-VITs, giọng std_kimngan..., $16.5/1M ký tự, trả thẳng audio)
+//   - key khác     → FPT.AI cũ (api.fpt.ai/hmi/tts/v5, giọng banmai..., async URL)
 func fptTTS(text, voice string) ([]byte, error) {
 	key := strings.TrimSpace(os.Getenv("FPT_TTS_API_KEY"))
 	if key == "" {
 		return nil, fmt.Errorf("thiếu FPT_TTS_API_KEY")
 	}
+	if strings.HasPrefix(key, "sk-") {
+		return fptMarketplaceTTS(key, text, voice)
+	}
 	var asyncURL string
 	var lastErr error
+	rl := 0 // số lần đã chờ vì rate limit
 	for attempt := 0; attempt < ttsMaxAttempts; attempt++ {
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * time.Second)
@@ -138,6 +163,7 @@ func fptTTS(text, voice string) ([]byte, error) {
 			return nil, fmt.Errorf("tạo request FPT.AI: %v", err)
 		}
 		req.Header.Set("api-key", key)
+		req.Header.Set("api_key", key) // docs FPT mới ghi api_key — gửi cả hai cho chắc
 		req.Header.Set("voice", voice)
 		req.Header.Set("speed", "")
 		resp, err := (&http.Client{Timeout: ttsHTTPTimeout}).Do(req)
@@ -147,6 +173,14 @@ func fptTTS(text, voice string) ([]byte, error) {
 		}
 		data, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if resp.StatusCode == 429 && rl < len(fptRateWaits) {
+			// Gói free bị giới hạn tần suất — chờ đủ lâu rồi thử lại.
+			reportProgress(fmt.Sprintf("⏳ FPT free bị giới hạn tần suất — chờ %.0fs rồi đọc tiếp…", fptRateWaits[rl].Seconds()))
+			time.Sleep(fptRateWaits[rl])
+			rl++
+			attempt-- // không tính lần chờ vào số attempt thường
+			continue
+		}
 		if resp.StatusCode != 200 {
 			lastErr = fmt.Errorf("FPT.AI HTTP %d: %s", resp.StatusCode, firstN(string(data), 200))
 			if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 429 {
@@ -169,8 +203,9 @@ func fptTTS(text, voice string) ([]byte, error) {
 	if asyncURL == "" {
 		return nil, lastErr
 	}
-	// Poll URL async cho tới khi có mp3 (FPT sinh mp3 sau vài giây).
-	deadline := time.Now().Add(ttsHTTPTimeout)
+	// Poll URL async cho tới khi có mp3. Gói free "request is queued" nên có
+	// thể chờ lâu hơn 60s → cho hẳn 3 phút.
+	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
 		resp, err := (&http.Client{Timeout: 15 * time.Second}).Get(asyncURL)
 		if err == nil {
@@ -184,6 +219,49 @@ func fptTTS(text, voice string) ([]byte, error) {
 		time.Sleep(1500 * time.Millisecond)
 	}
 	return nil, fmt.Errorf("FPT.AI: hết thời gian chờ file mp3")
+}
+
+// fptMarketplaceTTS gọi FPT AI Marketplace (OpenAI-compatible /v1/audio/speech).
+// Model FPT.AI-VITs nhận cả tên cũ (banmai...) lẫn std_* (std_kimngan...) —
+// truyền thẳng; tên sai thì API trả lỗi kèm danh sách giọng hợp lệ.
+func fptMarketplaceTTS(key, text, voice string) ([]byte, error) {
+	if strings.TrimSpace(voice) == "" {
+		voice = "std_banmai"
+	}
+	body, _ := json.Marshal(map[string]any{
+		"model":           "FPT.AI-VITs",
+		"input":           text,
+		"response_format": "wav",
+		"voice":           voice,
+	})
+	var lastErr error
+	for attempt := 0; attempt < ttsMaxAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+		req, err := http.NewRequest("POST", "https://mkp-api.fptcloud.com/v1/audio/speech", bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("tạo request FPT Marketplace: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+key)
+		resp, err := (&http.Client{Timeout: ttsHTTPTimeout}).Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		// Thành công = audio nhị phân (không phải JSON lỗi) và đủ lớn.
+		if resp.StatusCode == 200 && len(data) > 500 && !bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
+			return data, nil
+		}
+		lastErr = fmt.Errorf("FPT Marketplace HTTP %d: %s", resp.StatusCode, firstN(string(data), 200))
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 429 {
+			break // sai key/giọng/hết credit — không retry
+		}
+	}
+	return nil, lastErr
 }
 
 // ─── Google Translate TTS (miễn phí, không cần key) ─────────────────────────
@@ -272,7 +350,15 @@ func synthSegments(cfg Config, script *NarrationScript) ([]string, []float64, er
 	durs := make([]float64, n)
 	provider := strings.ToLower(strings.TrimSpace(cfg.TTSProvider))
 	if provider == "" {
-		provider = "elevenlabs"
+		provider = "google" // mặc định giọng free, không cần key
+		cfg.TTSProvider = provider
+	}
+	// Chọn ElevenLabs nhưng chưa có key → khỏi gọi API, chuyển thẳng Google free.
+	if provider != "google" && provider != "free" && provider != "fpt" &&
+		strings.TrimSpace(os.Getenv("ELEVENLABS_API_KEY")) == "" {
+		reportProgress("⚠️ Chưa có key ElevenLabs → dùng giọng Google free")
+		provider = "google"
+		cfg.TTSProvider = provider
 	}
 	voice := resolveVoiceID(cfg)
 
@@ -283,11 +369,30 @@ func synthSegments(cfg Config, script *NarrationScript) ([]string, []float64, er
 
 		if st, err := os.Stat(path); err != nil || st.Size() == 0 {
 			data, err := synthTTS(cfg, seg.Narration)
+			if err != nil && errors.Is(err, errElevenUnusable) {
+				// ElevenLabs chết (key sai/hết quota/gói free) → chuyển Google free
+				// cho cảnh này + các cảnh sau. Tính lại cache key để audio Google
+				// không bị lưu nhầm dưới key elevenlabs.
+				fmt.Fprintf(os.Stderr, "⚠️  ElevenLabs lỗi ở cảnh %d, chuyển giọng Google free: %v\n", i+1, err)
+				reportProgress("⚠️ ElevenLabs không dùng được → chuyển giọng Google free")
+				provider = "google"
+				cfg.TTSProvider = provider
+				voice = resolveVoiceID(cfg)
+				key = ttsCacheKey(provider, voice, seg.Narration)
+				path = filepathJoinTemp("img2video_tts_" + key + ".mp3")
+				if st, statErr := os.Stat(path); statErr == nil && st.Size() > 0 {
+					data, err = nil, nil // đã có sẵn trong cache Google
+				} else {
+					data, err = synthTTS(cfg, seg.Narration)
+				}
+			}
 			if err != nil {
 				return nil, nil, fmt.Errorf("TTS lỗi ở cảnh %d: %v", i+1, err)
 			}
-			if err := os.WriteFile(path, data, 0644); err != nil {
-				return nil, nil, fmt.Errorf("ghi mp3 cảnh %d: %v", i+1, err)
+			if len(data) > 0 {
+				if err := os.WriteFile(path, data, 0644); err != nil {
+					return nil, nil, fmt.Errorf("ghi mp3 cảnh %d: %v", i+1, err)
+				}
 			}
 		}
 
@@ -322,4 +427,40 @@ func ttsCacheKey(provider, voice, text string) string {
 	h := sha256.New()
 	h.Write([]byte("tts-v1|" + provider + "|" + elevenModelID + "|" + voice + "|" + text))
 	return fmt.Sprintf("%x", h.Sum(nil))[:16]
+}
+
+// ─── Nghe thử giọng (UI chọn giọng cho mode narrated) ───────────────────────
+
+const ttsPreviewText = "Chào các con vợ nhé, hôm nay tôi sẽ giới thiệu căn hộ xinh xỉu này."
+
+// ttsPreviewHandler: GET /api/tts-preview?provider=fpt&voice=std_banmai
+// → trả audio mẫu (cache theo provider+voice để không tốn tiền gọi lại).
+func ttsPreviewHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		provider := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("provider")))
+		cfg := Config{TTSProvider: provider, VoiceID: strings.TrimSpace(r.URL.Query().Get("voice"))}
+		voice := resolveVoiceID(cfg)
+
+		key := ttsCacheKey(provider, voice, "preview|"+ttsPreviewText)
+		path := filepathJoinTemp("img2video_ttsprev_" + key + ".bin")
+		data, err := os.ReadFile(path)
+		if err != nil || len(data) == 0 {
+			data, err = synthTTS(cfg, ttsPreviewText)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(502)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			_ = os.WriteFile(path, data, 0644)
+		}
+
+		if bytes.HasPrefix(data, []byte("RIFF")) {
+			w.Header().Set("Content-Type", "audio/wav")
+		} else {
+			w.Header().Set("Content-Type", "audio/mpeg")
+		}
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Write(data)
+	}
 }

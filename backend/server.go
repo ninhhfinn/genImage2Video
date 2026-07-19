@@ -84,7 +84,12 @@ type RenderRequest struct {
 	TTSProvider      string `json:"tts_provider"`
 	VoiceID          string `json:"voice_id"`
 	MaxSegments      int    `json:"max_segments"`
-	Music            string `json:"music"` // tên file nhạc trong music dir; "" = không nhạc
+	TargetDuration   int    `json:"target_duration"` // giây; 0 = không giới hạn
+	SubtitleStyle    string `json:"subtitle_style"`  // "karaoke" (mặc định) | "typewriter"
+	Music            string `json:"music"`           // tên file nhạc trong music dir; "" = không nhạc
+
+	// Kịch bản user đã duyệt/sửa từ panel "Xem kịch bản" (nil = Claude tự viết).
+	Script *NarrationScript `json:"script,omitempty"`
 }
 
 // ─── Start server ─────────────────────────────────────────────────────────
@@ -121,6 +126,15 @@ func startWebServer(port int) error {
 	mux.HandleFunc("/api/fonts", listFontsHandler())
 	mux.HandleFunc("/api/font-preview", fontPreviewHandler())
 	mux.HandleFunc("/api/delete-font", deleteFontHandler())
+
+	// Nghe thử giọng TTS (mode narrated) — cache theo provider+voice.
+	mux.HandleFunc("/api/tts-preview", ttsPreviewHandler())
+
+	// Xem/sửa kịch bản thuyết minh trước khi render (+ thư viện kịch bản đã lưu).
+	mux.HandleFunc("/api/script", scriptPreviewHandler(uploadDir))
+	mux.HandleFunc("/api/scripts", listScriptsHandler())
+	mux.HandleFunc("/api/like-script", likeScriptHandler())
+	mux.HandleFunc("/api/delete-script", deleteScriptHandler())
 
 	// Nhạc nền cho mode narrated (upload / list / delete).
 	mux.HandleFunc("/api/upload-music", uploadMusicHandler())
@@ -459,6 +473,9 @@ func renderHandler(uploadDir, outputDir string) http.HandlerFunc {
 			TTSProvider:      req.TTSProvider,
 			VoiceID:          req.VoiceID,
 			MaxSegments:      req.MaxSegments,
+			TargetDuration:   req.TargetDuration,
+			SubtitleStyle:    req.SubtitleStyle,
+			Script:           req.Script,
 		}
 		if cfg.Mode == "" {
 			cfg.Mode = "kenburns"
@@ -541,6 +558,81 @@ func renderHandler(uploadDir, outputDir string) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+	}
+}
+
+// ScriptRequest = POST /api/script: sinh (hoặc lấy từ cache) kịch bản thuyết
+// minh cho ảnh đã upload, KHÔNG render — để user xem/sửa trước.
+type ScriptRequest struct {
+	NarrationPersona string   `json:"narration_persona"`
+	TTSProvider      string   `json:"tts_provider"`
+	MaxSegments      int      `json:"max_segments"`
+	TargetDuration   int      `json:"target_duration"`
+	Nickname         string   `json:"nickname"`
+	Address          string   `json:"address"`
+	ListingID        string   `json:"listing_id"`
+	Prices           []string `json:"prices"`
+	Amenities        []string `json:"amenities"`
+	Force            bool     `json:"force"` // true = nút "Viết lại": bỏ qua cache
+}
+
+// scriptPreviewHandler sinh kịch bản cho panel "Xem kịch bản". Dùng đúng
+// genScript + cache như lúc render, nên duyệt xong bấm render KHÔNG gọi Claude
+// lần hai (trừ khi user sửa tay — bản sửa gửi kèm request render).
+func scriptPreviewHandler(uploadDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, 405)
+			return
+		}
+		var req ScriptRequest
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if !claudeCLIAvailable() && os.Getenv("ANTHROPIC_API_KEY") == "" {
+			writeJSONErr(w, 400, "Chưa có nguồn AI để viết kịch bản: cần Claude Code đăng nhập (lệnh `claude`) hoặc ANTHROPIC_API_KEY")
+			return
+		}
+		images, err := collectImages(uploadDir)
+		if err != nil || len(images) == 0 {
+			writeJSONErr(w, 400, "chưa có ảnh nào — upload ảnh hoặc chọn listing trước")
+			return
+		}
+
+		cfg := Config{
+			Narrate:          true,
+			NarrationPersona: req.NarrationPersona,
+			TTSProvider:      req.TTSProvider,
+			MaxSegments:      req.MaxSegments,
+			TargetDuration:   req.TargetDuration,
+			Nickname:         req.Nickname,
+			Address:          req.Address,
+			ListingID:        req.ListingID,
+			Prices:           req.Prices,
+			Amenities:        req.Amenities,
+			ForceScript:      req.Force,
+		}
+		images = capNarratedImages(cfg, images)
+
+		script, err := genScript(cfg, images)
+		if err != nil {
+			writeJSONErr(w, 500, err.Error())
+			return
+		}
+		_, wordBudget := narrationBudget(float64(cfg.TargetDuration), len(images), cfg.TTSProvider)
+		// Grounding: cảnh báo ngay trên panel nếu giá trong hook lệch dữ liệu.
+		hookWarning := ""
+		if tok, bad := hookPriceMismatch(script.HookLine1+" "+script.HookLine2, req.Prices); bad {
+			hookWarning = fmt.Sprintf("Giá %q trong hook không khớp dữ liệu giá listing — sửa lại trước khi render", tok)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"segments":      script.Segments,
+			"hook_line1":    script.HookLine1,
+			"hook_line2":    script.HookLine2,
+			"hook_emphasis": script.HookEmphasis,
+			"hook_warning":  hookWarning,
+			"word_budget":   wordBudget,
+		})
 	}
 }
 

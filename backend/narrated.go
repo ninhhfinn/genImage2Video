@@ -2,13 +2,12 @@ package main
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"img2video/textrender"
 )
 
 // ─── Mode "narrated": ghép video có lời kể + phụ đề + nhạc nền duck ──────────
@@ -16,11 +15,74 @@ import (
 const (
 	narratedCross = 0.5 // crossfade giữa các cảnh (giây)
 	narratedPad   = 1.6 // đệm mỗi cảnh: 0.8 dẫn + 0.8 đuôi (≥ 2·cross + 0.2)
+
+	narratedMinWords = 13 // đoạn ngắn hơn thế thì cụt, hết hài
 )
+
+// narrationRate = tốc độ đọc thực tế (từ/giây) theo TTS provider.
+// google ĐO THẬT 2026-07-14: ~2.2-2.4 từ/s (render 8 cảnh ra 57.3s ✓).
+// fpt ĐO THẬT: Marketplace VITs std_kimngan 16 từ → 5.4s ≈ 3.0; banmai cũ ≈ 3.6.
+// elevenlabs ĐO THẬT 2026-07-15 (George đọc VN): 2.58-3.06 từ/s qua 3 render → 2.8.
+func narrationRate(provider string) float64 {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "", "google", "free":
+		return 2.2
+	case "fpt":
+		if strings.HasPrefix(strings.TrimSpace(os.Getenv("FPT_TTS_API_KEY")), "sk-") {
+			return 2.6 // FPT AI Marketplace (VITs) — đo render thật: 152 từ/58.1s
+		}
+		return 3.6 // FPT.AI cũ (banmai...)
+	default: // elevenlabs
+		return 2.8
+	}
+}
+
+// narrationBudget tính (số cảnh hiệu dụng, số từ tối đa/đoạn) để video narrated
+// vừa khít targetSec với giọng của provider. Từ computeNarratedTimeline:
+// Total ≈ Σv_i + n·(pad−cross) + cross, tức overhead 1.1s/cảnh + 0.5s cố định.
+// targetSec <= 0 → tắt giới hạn (giữ nguyên n, budget 0 = prompt như cũ).
+func narrationBudget(targetSec float64, n int, provider string) (effN, wordsPerSeg int) {
+	if targetSec <= 0 || n <= 0 {
+		return n, 0
+	}
+	rate := narrationRate(provider)
+	minSpeech := narratedMinWords / rate // giây đọc tối thiểu cho 1 cảnh còn "đáng"
+	h := narratedPad - narratedCross     // overhead mỗi cảnh (1.1s)
+	nMax := int((targetSec - narratedCross) / (minSpeech + h))
+	if nMax < 1 {
+		nMax = 1
+	}
+	effN = n
+	if effN > nMax {
+		effN = nMax
+	}
+	speech := (targetSec - narratedCross - float64(effN)*h) / float64(effN)
+	wordsPerSeg = int(speech * rate)
+	if wordsPerSeg < 10 {
+		wordsPerSeg = 10
+	}
+	return effN, wordsPerSeg
+}
 
 // filepathJoinTemp trả về đường dẫn trong thư mục temp hệ thống.
 func filepathJoinTemp(name string) string {
 	return filepath.Join(os.TempDir(), name)
+}
+
+func scriptWordCount(s *NarrationScript) int {
+	total := 0
+	for _, seg := range s.Segments {
+		total += len(strings.Fields(seg.Narration))
+	}
+	return total
+}
+
+func sumFloat(xs []float64) float64 {
+	t := 0.0
+	for _, x := range xs {
+		t += x
+	}
+	return t
 }
 
 // reportProgress cập nhật tiến trình cho /api/status (và in ra stderr).
@@ -40,15 +102,17 @@ func narratePreflight(cfg Config) error {
 		return fmt.Errorf("Chưa có nguồn AI để viết kịch bản: cần Claude Code đăng nhập (lệnh `claude`) HOẶC đặt biến môi trường ANTHROPIC_API_KEY trên máy chạy backend")
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.TTSProvider)) {
-	case "google", "free":
+	case "", "google", "free":
 		// Google TTS miễn phí, không cần key.
 	case "fpt":
 		if os.Getenv("FPT_TTS_API_KEY") == "" {
 			return fmt.Errorf("Chưa có FPT_TTS_API_KEY — cần key FPT.AI để lồng giọng (hoặc đổi sang Google free / ElevenLabs)")
 		}
 	default:
+		// ElevenLabs thiếu key KHÔNG chặn render nữa — synthSegments sẽ tự
+		// chuyển sang giọng Google free (có warning trong progress).
 		if os.Getenv("ELEVENLABS_API_KEY") == "" {
-			return fmt.Errorf("Chưa có ELEVENLABS_API_KEY — cần key ElevenLabs để lồng giọng (hoặc đổi sang Google free / FPT.AI)")
+			reportProgress("⚠️ Chưa có ELEVENLABS_API_KEY — sẽ tự dùng giọng Google free")
 		}
 	}
 	return nil
@@ -130,13 +194,10 @@ func computeNarratedTimeline(voiceDur []float64, cross, pad float64, fps int) na
 	return tl
 }
 
-// buildNarrated dựng lệnh ffmpeg cho mode "narrated".
-func buildNarrated(cfg Config, images []string) ([]string, error) {
-	if err := narratePreflight(cfg); err != nil {
-		return nil, err
-	}
-
-	// Cap số ảnh theo MaxSegments (mặc định 10).
+// capNarratedImages cắt danh sách ảnh theo MaxSegments (mặc định 10, trần 20)
+// và theo thời lượng mục tiêu (số cảnh tối đa tuỳ tốc độ giọng provider).
+// Dùng chung cho buildNarrated và /api/script để hai nơi cap giống hệt nhau.
+func capNarratedImages(cfg Config, images []string) []string {
 	maxSeg := cfg.MaxSegments
 	if maxSeg <= 0 {
 		maxSeg = 10
@@ -144,17 +205,40 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 	if maxSeg > 20 {
 		maxSeg = 20
 	}
+	if effN, _ := narrationBudget(float64(cfg.TargetDuration), maxSeg, cfg.TTSProvider); effN < maxSeg {
+		reportProgress(fmt.Sprintf("⏱️ Giảm còn %d cảnh cho vừa ~%ds", effN, cfg.TargetDuration))
+		maxSeg = effN
+	}
 	if len(images) > maxSeg {
 		images = images[:maxSeg]
 	}
+	return images
+}
+
+// buildNarrated dựng lệnh ffmpeg cho mode "narrated".
+func buildNarrated(cfg Config, images []string) ([]string, error) {
+	if err := narratePreflight(cfg); err != nil {
+		return nil, err
+	}
+
+	images = capNarratedImages(cfg, images)
 	if len(images) == 0 {
 		return nil, fmt.Errorf("không có ảnh để dựng video")
 	}
 	cfg.GridIntro = false // narrated không dùng lưới intro
 
-	// 1) Kịch bản (Claude).
+	// Phụ đề ASS + hook + sticker/khói đều được thiết kế cho khung DỌC 9:16
+	// (PlayResX/Y=1080/1920, toạ độ px cố định, khói pad 1080×1920). Khung khác
+	// 9:16 sẽ (a) làm libass kéo méo phụ đề, (b) khiến blend khói lệch kích thước
+	// → HỎNG cả render. Nên ép narrated về đúng 1080×1920 dù toggle 9:16 tắt.
+	if cfg.Width*16 != cfg.Height*9 {
+		reportProgress("ℹ️ Thuyết minh AI luôn xuất video dọc 9:16 (1080×1920)")
+	}
+	cfg.Width, cfg.Height = 1080, 1920
+
+	// 1) Kịch bản: bản user đã duyệt/sửa (cfg.Script) hoặc Claude viết.
 	reportProgress("🧠 Đang viết kịch bản (Claude nhìn ảnh)…")
-	script, err := genScript(cfg, images)
+	script, err := scriptForConfig(cfg, images)
 	if err != nil {
 		return nil, err
 	}
@@ -175,8 +259,22 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 		return nil, err
 	}
 
+	// Kịch bản sống sót tới TTS = sẽ vào video → lưu vào thư viện (user like
+	// bản hay để thành ví dụ few-shot cho các lần viết sau).
+	saveScriptEntry(cfg, script, cfg.Script != nil)
+
+	// Log tốc độ đọc thực tế để hiệu chỉnh narrationRate (từ/giây theo provider).
+	if totalWords, totalVoice := scriptWordCount(script), sumFloat(voiceDur); totalVoice > 0 {
+		fmt.Fprintf(os.Stderr, "ℹ️  Tốc độ đọc thực tế: %.2f từ/s (%d từ / %.1fs, provider %s)\n",
+			float64(totalWords)/totalVoice, totalWords, totalVoice, cfg.TTSProvider)
+	}
+
 	// 3) Timeline đồng bộ.
 	tl := computeNarratedTimeline(voiceDur, narratedCross, narratedPad, cfg.FPS)
+
+	if cfg.TargetDuration > 0 && tl.Total > float64(cfg.TargetDuration)*1.2 {
+		fmt.Fprintf(os.Stderr, "⚠️  Video %.1fs vượt mục tiêu %ds (lời kể dài hơn dự kiến)\n", tl.Total, cfg.TargetDuration)
+	}
 
 	reportProgress(fmt.Sprintf("🎬 Dựng video %d cảnh · %.1fs", n, tl.Total))
 
@@ -235,39 +333,95 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 		perEffect[i] = pool[rand.Intn(len(pool))]
 	}
 
-	// ── Inputs: ảnh, template PNG, caption PNG, giọng mp3, (nhạc) ──
+	// ── Phụ đề ASS (karaoke/typewriter + hook) — thay bảng giá + caption pill.
+	// Narrated KHÔNG dùng template overlay nữa (bảng giá/panel/veil), chỉ giữ
+	// watermark; toàn bộ chữ động (hook typewriter, karaoke theo giọng, tim bay)
+	// nằm trong 1 file .ass render bằng libass. Xem narrated_subtitles.go.
+	// Dọn thư mục subs của lần render trước (chứa subs.ass + ~1.2MB font đã copy)
+	// — args trả về còn tham chiếu subsTmp nên không thể defer-remove ngay ở đây;
+	// best-effort GC lần trước để không rò rỉ tích luỹ.
+	if olds, _ := filepath.Glob(filepath.Join(os.TempDir(), "img2video_subs_*")); olds != nil {
+		for _, d := range olds {
+			os.RemoveAll(d)
+		}
+	}
+	subsTmp, err := os.MkdirTemp("", "img2video_subs_*")
+	if err != nil {
+		return nil, err
+	}
+	hookEnd := tl.Total
+	if n > 1 {
+		hookEnd = tl.Offsets[1]
+	}
+	hookL1, hookL2, hookEmph := script.HookLine1, script.HookLine2, script.HookEmphasis
+	if strings.TrimSpace(hookL1)+strings.TrimSpace(hookL2) == "" {
+		hookL1, hookL2, hookEmph = composeHookTitle(cfg)
+	}
+	// Grounding: giá hiện trên hook phải khớp giá trong dữ liệu listing (API).
+	if tok, bad := hookPriceMismatch(hookL1+" "+hookL2, cfg.Prices); bad {
+		reportProgress(fmt.Sprintf("⚠️ Giá %q trên tiêu đề hook KHÔNG khớp dữ liệu giá listing — sửa lại ở panel Xem kịch bản", tok))
+	}
+	subtitleStyle := normalizeSubtitleStyle(cfg.SubtitleStyle)
+	stickerPath := stickerAssetPath("meme_cat.png")
+	smokePath := stickerAssetPath("pink_ink.mp4")
+	if subtitleStyle == "typewriter" {
+		// Kiểu lovebox: sạch — không sticker/tim/khói (chỉ karaoke có trang trí).
+		stickerPath, smokePath = "", ""
+	} else if stickerPath == "" {
+		reportProgress("ℹ️ Không có assets/stickers/meme_cat.png — bỏ qua sticker + tim bay")
+	}
+	seedH := fnv.New32a()
+	seedH.Write([]byte(cfg.ListingID))
+	assPath, fontsDir, err := writeNarratedASS(narratedSubtitleSpec{
+		Style:      subtitleStyle,
+		Script:     script,
+		Timeline:   tl,
+		VoiceDur:   voiceDur,
+		VoicePaths: voicePaths,
+		Accent:     accentForTemplate(cfg.Template),
+		HookEnd:    hookEnd,
+		HookLine1:  hookL1,
+		HookLine2:  hookL2,
+		HookEmph:   hookEmph,
+		Amenities:  cfg.Amenities,
+		Hearts:     stickerPath != "",
+		Seed:       int64(seedH.Sum32()),
+	}, subsTmp)
+	if err != nil {
+		return nil, fmt.Errorf("sinh phụ đề ASS: %v", err)
+	}
+
+	// ── Inputs: ảnh, watermark PNG, sticker, khói, giọng mp3, (nhạc) ──
 	var args []string
 	for i := 0; i < n; i++ {
 		t := tl.ClipDur[i] + tl.Cross + 0.2
 		args = append(args, "-loop", "1", "-t", fmt.Sprintf("%.3f", t), "-i", segImages[i])
 	}
 
-	// Template overlay (thông tin listing xuyên suốt) — tái dùng hệ có sẵn.
-	overlayPlans, _, err := prepareTextOverlayPlans(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("textrender overlays: %v", err)
+	var overlayPlans []OverlayPlan
+	if wm, werr := renderWatermarkPlan(cfg, subsTmp); werr == nil && wm != nil {
+		overlayPlans = append(overlayPlans, *wm)
 	}
 	templateFirstIdx := n
 	for _, p := range overlayPlans {
 		args = append(args, "-i", p.PNGPath)
 	}
 
-	// Caption PNG per-segment.
-	capTmp, err := os.MkdirTemp("", "img2video_caption_*")
-	if err != nil {
-		return nil, err
+	nextIdx := n + len(overlayPlans)
+	stkIdx, smkIdx := -1, -1
+	if stickerPath != "" {
+		stkIdx = nextIdx
+		nextIdx++
+		args = append(args, "-i", stickerPath)
 	}
-	captionPlans, err := renderCaptionPlans(cfg, script, tl, capTmp)
-	if err != nil {
-		return nil, fmt.Errorf("render phụ đề: %v", err)
-	}
-	captionFirstIdx := n + len(overlayPlans)
-	for _, p := range captionPlans {
-		args = append(args, "-i", p.PNGPath)
+	if smokePath != "" && tl.Total > 2.5 {
+		smkIdx = nextIdx
+		nextIdx++
+		args = append(args, "-i", smokePath)
 	}
 
 	// Giọng đọc mp3.
-	voiceFirstIdx := captionFirstIdx + len(captionPlans)
+	voiceFirstIdx := nextIdx
 	for i := 0; i < n; i++ {
 		args = append(args, "-i", voicePaths[i])
 	}
@@ -313,14 +467,32 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 	filterStr += fmt.Sprintf(";\n[vout]trim=duration=%.3f,setpts=PTS-STARTPTS[vtrim]", tl.Total)
 	mapTarget := "[vtrim]"
 
-	if chain := buildOverlayFilterChain(overlayPlans, mapTarget, "[vtpl]", templateFirstIdx); chain != "" {
+	if chain := buildOverlayFilterChain(overlayPlans, mapTarget, "[vwm]", templateFirstIdx); chain != "" {
 		filterStr += chain
-		mapTarget = "[vtpl]"
+		mapTarget = "[vwm]"
 	}
-	if chain := buildOverlayFilterChain(captionPlans, mapTarget, "[vfinal]", captionFirstIdx); chain != "" {
-		filterStr += chain
-		mapTarget = "[vfinal]"
+	// Sticker mèo: trượt từ mép trên xuống y=240 trong ~0.4s (ease-out), đứng
+	// yên trên hook, biến mất cùng hook (cắt phụt như video mẫu).
+	if stkIdx >= 0 {
+		filterStr += fmt.Sprintf(";\n[%d:v]scale=190:-1[stk]", stkIdx)
+		filterStr += fmt.Sprintf(
+			";\n%s[stk]overlay=x=(main_w-overlay_w)/2:y='if(lt(t,0.45),240-(240+overlay_h)*pow(1-min(t/0.4,1),2),240)':enable='between(t,0.05,%.3f)'[vstk]",
+			mapTarget, hookEnd)
+		mapTarget = "[vstk]"
 	}
+	// Khói hồng screen-blend 0–1.8s (nền đen thuần → sau fade là no-op). Pad
+	// đúng kích thước khung (cfg.Width×Height) — blend yêu cầu 2 nhánh cùng cỡ,
+	// hardcode 1080×1920 sẽ vỡ nếu khung khác.
+	if smkIdx >= 0 {
+		filterStr += fmt.Sprintf(
+			";\n[%d:v]trim=0:1.8,setpts=PTS-STARTPTS,scale=%d:-2,pad=%d:%d:(ow-iw)/2:450:black,fade=t=out:st=1.3:d=0.5,tpad=stop_mode=add:stop_duration=%.3f,format=gbrp[smk]",
+			smkIdx, cfg.Width, cfg.Width, cfg.Height, tl.Total-1.8)
+		filterStr += fmt.Sprintf(";\n%sformat=gbrp[vg];\n[vg][smk]blend=all_mode=screen:all_opacity=0.85[vsmk]", mapTarget)
+		mapTarget = "[vsmk]"
+	}
+	// Phụ đề ASS LUÔN CUỐI CÙNG (đè lên mọi lớp).
+	filterStr += fmt.Sprintf(";\n%s%s[vsub]", mapTarget, subtitlesFilterArg(assPath, fontsDir))
+	mapTarget = "[vsub]"
 
 	// ── Filtergraph audio ──
 	filterStr += fmt.Sprintf(";\nanullsrc=r=44100:cl=stereo,atrim=duration=%.3f[abase]", tl.Total)
@@ -357,46 +529,5 @@ func buildNarrated(cfg Config, images []string) ([]string, error) {
 	return append(args, "-y", cfg.Output), nil
 }
 
-// renderCaptionPlans vẽ 1 PNG phụ đề pill cho mỗi cảnh, bật/tắt theo cửa sổ
-// [CapStart, CapEnd]. Dùng textrender (KHÔNG dùng Chrome — Chrome nướng sẵn veil
-// tối full-frame + chậm).
-func renderCaptionPlans(cfg Config, script *NarrationScript, tl narratedTimeline, tmpDir string) ([]OverlayPlan, error) {
-	ctx := &textrender.RenderContext{
-		VideoWidth:  cfg.Width,
-		VideoHeight: cfg.Height,
-		AssetsDir:   assetsDir(),
-	}
-	var plans []OverlayPlan
-	for i, seg := range script.Segments {
-		text := strings.TrimSpace(seg.Caption)
-		if text == "" {
-			continue
-		}
-		style := &textrender.ElementStyle{
-			Text:     text,
-			FontFile: "BeVietnamPro-Bold.ttf",
-			SizePct:  0.036,
-			Color:    "#FFFFFF",
-			Bg: &textrender.BgStyle{
-				Color:   "#000000",
-				Alpha:   0.55,
-				Radius:  20,
-				Padding: [2]float64{12, 28},
-			},
-			Position:    textrender.Position{X: "center", Y: "0.72"},
-			Align:       "center",
-			MaxWidthPct: 0.82,
-		}
-		out, err := textrender.Render(style, ctx)
-		if err != nil || out == nil {
-			continue
-		}
-		path := filepath.Join(tmpDir, fmt.Sprintf("cap%02d.png", i))
-		if err := out.Save(path); err != nil {
-			continue
-		}
-		enable := fmt.Sprintf("between(t,%.3f,%.3f)", tl.CapStart[i], tl.CapEnd[i])
-		plans = append(plans, OverlayPlan{PNGPath: path, X: out.X, Y: out.Y, EnableExpr: enable})
-	}
-	return plans, nil
-}
+// (renderCaptionPlans đã bỏ: caption pill nhãn phòng được thay bằng phụ đề
+// karaoke/typewriter theo giọng đọc trong narrated_subtitles.go.)

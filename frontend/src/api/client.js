@@ -67,6 +67,19 @@ export const getMusic = () =>
 export const deleteMusic = (music) =>
   api.post('/delete-music', { music })
 
+// ── Kịch bản thuyết minh: xem/sửa trước render + thư viện dạy Claude ──
+export const fetchScript = (body) =>
+  api.post('/script', body, { timeout: 300000 }) // Claude viết ~30–120s
+
+export const getScripts = () =>
+  api.get('/scripts').then(r => r.data || [])
+
+export const likeScript = (id, liked) =>
+  api.post('/like-script', { id, liked })
+
+export const deleteScript = (id) =>
+  api.post('/delete-script', { id })
+
 export const downloadVideo = () => {
   window.location.href = '/api/download'
 }
