@@ -393,11 +393,13 @@ func runIntroDriveImport(url string) {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// gdown 6.x: fuzzy (nhận URL đầy đủ) là MẶC ĐỊNH, không còn cờ --fuzzy.
+	// File lẻ: -O <dir>/ (dấu "/" cuối → lưu vào thư mục theo tên gốc).
 	var cmd *exec.Cmd
 	if strings.Contains(url, "/folders/") || strings.Contains(url, "/drive/folders") {
 		cmd = exec.Command(gdownBin(), "--folder", url, "-O", tmpDir)
 	} else {
-		cmd = exec.Command(gdownBin(), "--fuzzy", url, "-O", tmpDir)
+		cmd = exec.Command(gdownBin(), url, "-O", tmpDir+string(os.PathSeparator))
 	}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		introImport.addError("gdown lỗi: " + err.Error() + " | " + tailBytes(out, 400))

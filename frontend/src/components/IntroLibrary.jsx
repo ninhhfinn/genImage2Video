@@ -56,9 +56,12 @@ export default function IntroLibrary() {
     }, 2000)
   }, [refresh])
 
-  const handleImport = async () => {
-    const url = driveUrl.trim()
-    if (!url) return
+  const handleImport = useCallback(async (rawUrl) => {
+    const url = (rawUrl ?? driveUrl).trim()
+    if (!url || imp?.running) return
+    if (!/drive\.google\.com|docs\.google\.com/.test(url)) {
+      setErr('Link không phải Google Drive'); return
+    }
     setErr('')
     try {
       const { data } = await importIntroDrive(url)
@@ -68,6 +71,12 @@ export default function IntroLibrary() {
     } catch (e) {
       setErr(e?.response?.data?.error || e.message || 'Nhập Drive lỗi')
     }
+  }, [driveUrl, imp, pollImport])
+
+  // Dán link Drive vào là TẢI NGAY (khỏi bấm nút). Cũng nhận khi gõ xong + Enter.
+  const handlePaste = (e) => {
+    const pasted = (e.clipboardData?.getData('text') || '').trim()
+    if (pasted) { setDriveUrl(pasted); handleImport(pasted) }
   }
 
   const importing = imp?.running
@@ -135,7 +144,9 @@ export default function IntroLibrary() {
           type="text"
           value={driveUrl}
           onChange={e => setDriveUrl(e.target.value)}
-          placeholder="Dán link Google Drive (folder hoặc file)…"
+          onPaste={handlePaste}
+          onKeyDown={e => { if (e.key === 'Enter') handleImport() }}
+          placeholder="Dán link Google Drive vào đây (tự tải luôn)…"
           style={{ flex: 1, minWidth: 0 }}
           disabled={importing}
         />
@@ -143,9 +154,9 @@ export default function IntroLibrary() {
           type="button"
           className="seg-btn"
           disabled={importing || !driveUrl.trim()}
-          onClick={handleImport}
+          onClick={() => handleImport()}
         >
-          {importing ? '⏳ Đang nhập…' : '↧ Nhập từ Drive'}
+          {importing ? '⏳ Đang tải…' : '↧ Tải'}
         </button>
       </div>
 
