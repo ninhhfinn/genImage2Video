@@ -143,6 +143,13 @@ func startWebServer(port int) error {
 	mux.HandleFunc("/api/music", listMusicHandler())
 	mux.HandleFunc("/api/delete-music", deleteMusicHandler())
 
+	// Thư viện clip "cảnh đi đường" (intro) — upload / list / delete / import Drive.
+	mux.HandleFunc("/api/upload-intro", uploadIntroHandler())
+	mux.HandleFunc("/api/intros", listIntrosHandler())
+	mux.HandleFunc("/api/delete-intro", deleteIntroHandler())
+	mux.HandleFunc("/api/import-intro-drive", importIntroDriveHandler())
+	mux.HandleFunc("/api/intro-import-status", introImportStatusHandler())
+
 	// Health check
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "2.0.0"})

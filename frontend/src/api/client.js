@@ -67,6 +67,25 @@ export const getMusic = () =>
 export const deleteMusic = (music) =>
   api.post('/delete-music', { music })
 
+// ── Thư viện clip "cảnh đi đường" (intro) — dùng cho Thuyết minh AI ──
+export const uploadIntro = (file) => {
+  const fd = new FormData()
+  fd.append('intro', file)
+  return api.post('/upload-intro', fd, { timeout: 600000 }) // .MOV to + chuẩn hoá ffmpeg
+}
+
+export const getIntros = () =>
+  api.get('/intros').then(r => r.data || [])
+
+export const deleteIntro = (intro) =>
+  api.post('/delete-intro', { intro })
+
+export const importIntroDrive = (url) =>
+  api.post('/import-intro-drive', { url })
+
+export const getIntroImportStatus = () =>
+  api.get('/intro-import-status').then(r => r.data)
+
 // ── Kịch bản thuyết minh: xem/sửa trước render + thư viện dạy Claude ──
 export const fetchScript = (body) =>
   api.post('/script', body, { timeout: 300000 }) // Claude viết ~30–120s

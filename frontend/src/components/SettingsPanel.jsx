@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import TemplatePicker from './TemplatePicker'
 import FontUpload from './FontUpload'
 import MusicPicker from './MusicPicker'
+import IntroLibrary from './IntroLibrary'
 
 // 9 giọng FPT.AI-VITs (Marketplace) — value gửi thẳng làm voice_id.
 const FPT_VOICES = [
@@ -281,6 +282,8 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
                   </div>
                   <div className={`toggle${introClip?' on':''}`} onClick={()=>set('introClip')(!introClip)}/>
                 </div>
+
+                {introClip && <IntroLibrary />}
               </>
             )}
 

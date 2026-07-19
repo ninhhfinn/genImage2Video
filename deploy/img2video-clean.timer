@@ -1,0 +1,9 @@
+[Unit]
+Description=Chay don rac img2video moi ngay
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

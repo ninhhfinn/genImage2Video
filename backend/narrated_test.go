@@ -631,6 +631,29 @@ func TestScriptCacheKeyVersion(t *testing.T) {
 	}
 }
 
+// TestScriptCacheKeyModel: đổi NARRATE_MODEL → cache key khác (không ăn kịch bản
+// của model cũ). Default (unset) = claude-opus-4-8.
+func TestScriptCacheKeyModel(t *testing.T) {
+	isolateScriptLib(t)
+	cfg := Config{ListingID: "L1", NarrationPersona: "haihuoc", Nickname: "Test"}
+	hashes := []string{"aaa", "bbb"}
+
+	os.Unsetenv("NARRATE_MODEL")
+	if narrateModel() != narrateDefaultModel {
+		t.Fatalf("mặc định phải là %q, đang %q", narrateDefaultModel, narrateModel())
+	}
+	kDefault := scriptCacheKey(cfg, hashes)
+
+	t.Setenv("NARRATE_MODEL", "claude-sonnet-5")
+	kSonnet := scriptCacheKey(cfg, hashes)
+	if kSonnet == kDefault {
+		t.Errorf("đổi NARRATE_MODEL phải đổi cache key (opus vs sonnet)")
+	}
+	if narrateModel() != "claude-sonnet-5" {
+		t.Errorf("narrateModel() phải đọc env, đang %q", narrateModel())
+	}
+}
+
 // TestTTSProviderFallback: ElevenLabs không dùng được → synthSegments tự chuyển
 // giọng Google free thay vì chết render. Cần ffmpeg/ffprobe (đo mp3), không mạng.
 func TestTTSProviderFallback(t *testing.T) {

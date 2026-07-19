@@ -1,0 +1,8 @@
+[Unit]
+Description=Don rac cache/output tam cua img2video trong /tmp (>7 ngay)
+
+[Service]
+Type=oneshot
+# Xoa FILE cu >7 ngay: ca file img2video_* roi (depth 1) lan file trong thu muc
+# img2video_* (depth 2). Giu lai thu muc de app khong truot vi mat parent.
+ExecStart=/usr/bin/find /tmp -maxdepth 2 -type f -path '/tmp/img2video_*' -mtime +7 -delete

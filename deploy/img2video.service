@@ -1,0 +1,24 @@
+[Unit]
+Description=img2video — Go backend + static frontend (Thuyet minh AI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=img2video
+Group=img2video
+# QUAN TRONG NHAT: distDir "dist" (server.go) va assetsDir() deu la duong dan
+# TUONG DOI theo CWD. Sai WorkingDirectory -> trang trang / mat font / mat clip.
+WorkingDirectory=/opt/img2video/backend
+EnvironmentFile=/etc/img2video/secrets.env
+# claude CLI (goi Max) + go nam o /usr/local/bin va ~img2video/.local/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/opt/img2video-venv/bin
+ExecStart=/opt/img2video/backend/img2video --web
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+LimitNOFILE=65536
+# KHONG bat PrivateTmp: output + cache o /tmp/img2video_*, timer don rac can thay chung.
+
+[Install]
+WantedBy=multi-user.target

@@ -27,17 +27,14 @@ const (
 // introAssetOverride: test seam — trỏ clip intro sang file tạm trong test.
 var introAssetOverride string
 
-// introAssetPath trả về đường dẫn clip cảnh đi đường (assets/intro/street.mp4)
-// hoặc "" nếu chưa có file (giống stickerAssetPath → thiếu asset thì bỏ qua êm).
+// introAssetPath trả về đường dẫn clip cảnh đi đường. Bốc NGẪU NHIÊN 1 clip từ
+// thư viện assets/intro/*.mp4 (pickIntroClip, xem intro.go), tránh lặp clip vừa
+// dùng. Thư viện rỗng → "" (giống stickerAssetPath → thiếu asset thì bỏ qua êm).
 func introAssetPath() string {
 	if introAssetOverride != "" {
 		return introAssetOverride
 	}
-	p := filepath.Join(assetsDir(), "intro", "street.mp4")
-	if _, err := os.Stat(p); err != nil {
-		return ""
-	}
-	return p
+	return pickIntroClip()
 }
 
 // introEnabled: có chèn cảnh đi đường mở đầu không. Chỉ áp dụng cho persona

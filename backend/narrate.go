@@ -172,7 +172,7 @@ func claudeCodeScript(cfg Config, images []string) (*NarrationScript, error) {
 	cmd := exec.CommandContext(ctx, "claude", "-p", b.String(),
 		"--output-format", "json",
 		"--allowedTools", "Read",
-		"--model", "opus")
+		"--model", narrateModel())
 	cmd.Dir = workDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -229,7 +229,7 @@ func anthropicAPIScript(cfg Config, images []string) (*NarrationScript, error) {
 	defer cancel()
 
 	msg, err := client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.ModelClaudeOpus4_8,
+		Model:     anthropic.Model(narrateModel()),
 		MaxTokens: 8000,
 		System: []anthropic.TextBlockParam{
 			{Text: narrationFullSystemPrompt(cfg, wordBudget)},
@@ -263,6 +263,20 @@ func anthropicAPIScript(cfg Config, images []string) (*NarrationScript, error) {
 // narrationPromptVersion nằm trong scriptCacheKey — BUMP mỗi khi sửa prompt để
 // bust cache kịch bản cũ (không thì render lại vẫn dùng kịch bản theo prompt cũ).
 const narrationPromptVersion = "v6"
+
+// narrateDefaultModel: model mặc định khi sinh kịch bản (Claude Code CLI + SDK).
+const narrateDefaultModel = "claude-opus-4-8"
+
+// narrateModel: model dùng để viết kịch bản, override qua env NARRATE_MODEL
+// (vd claude-sonnet-5 để giảm ~60% chi phí). Dùng CHUNG cho cả nhánh Claude
+// Code CLI (--model) lẫn Anthropic SDK, và PHẢI nằm trong scriptCacheKey kẻo
+// đổi model lại ăn cache kịch bản của model cũ.
+func narrateModel() string {
+	if m := strings.TrimSpace(os.Getenv("NARRATE_MODEL")); m != "" {
+		return m
+	}
+	return narrateDefaultModel
+}
 
 // ─── 4 khung kể chuyện A–D (SPEC Dayladau §3.1) ──────────────────────────────
 
@@ -781,6 +795,7 @@ func scriptCacheKey(cfg Config, imgHashes []string) string {
 	_, wordBudget := narrationBudget(narrTargetSec(cfg), len(imgHashes), cfg.TTSProvider)
 	h := sha256.New()
 	h.Write([]byte("narr-" + narrationPromptVersion + "|"))            // bump version mỗi khi sửa prompt
+	h.Write([]byte(narrateModel() + "|"))                             // đổi model → kịch bản khác → không ăn cache model cũ
 	h.Write([]byte(narrationExamplesHash(cfg.NarrationPersona) + "|")) // like/bỏ like ví dụ → prompt khác → key khác
 	h.Write([]byte(strconv.Itoa(wordBudget) + "|"))
 	// audience + intro đổi prompt/schema → kịch bản khác.
