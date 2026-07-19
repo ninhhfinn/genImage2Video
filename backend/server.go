@@ -146,6 +146,7 @@ func startWebServer(port int) error {
 	// Thư viện clip "cảnh đi đường" (intro) — upload / list / delete / import Drive.
 	mux.HandleFunc("/api/upload-intro", uploadIntroHandler())
 	mux.HandleFunc("/api/intros", listIntrosHandler())
+	mux.HandleFunc("/api/intro-file", introFileHandler())
 	mux.HandleFunc("/api/delete-intro", deleteIntroHandler())
 	mux.HandleFunc("/api/import-intro-drive", importIntroDriveHandler())
 	mux.HandleFunc("/api/intro-import-status", introImportStatusHandler())

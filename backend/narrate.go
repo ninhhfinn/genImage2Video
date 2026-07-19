@@ -166,7 +166,9 @@ func claudeCodeScript(cfg Config, images []string) (*NarrationScript, error) {
 	b.WriteString(`{"segments":[{"image_index":<int>,"caption":"<2-4 từ>","narration":"<lời kể>"}],"hook_line1":"<tên căn, ≤26 ký tự>","hook_line2":"<giá mồi, ≤26 ký tự>","hook_emphasis":"<cụm nhấn nằm nguyên văn trong 1 dòng>"` + introField + `}`)
 	b.WriteString(fmt.Sprintf("\nĐúng %d phần tử, image_index từ 0 đến %d theo thứ tự.\n", len(images), len(images)-1))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	// 300s: claude CLI đọc từng ảnh qua tool Read (mỗi ảnh 1 round-trip) nên với
+	// listing nhiều ảnh (10-12) dễ vượt 180s → bị SIGKILL "signal: killed".
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "claude", "-p", b.String(),

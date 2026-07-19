@@ -82,12 +82,33 @@ export default function IntroLibrary() {
         </div>
       )}
 
-      <div className="font-chips">
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         {clips.map(c => (
-          <span key={c.file} className="font-chip" title={c.label}>
-            {c.label}
-            <span className="font-x" title="Xoá" onClick={(e) => handleDelete(c.file, e)}>✕</span>
-          </span>
+          <div key={c.file} style={{ position: 'relative', width: 84 }}>
+            <video
+              src={`/api/intro-file?name=${encodeURIComponent(c.file)}#t=0.6`}
+              muted
+              playsInline
+              preload="metadata"
+              title={c.label}
+              onMouseEnter={e => { e.currentTarget.play?.().catch(() => {}) }}
+              onMouseLeave={e => { e.currentTarget.pause?.(); e.currentTarget.currentTime = 0.6 }}
+              style={{
+                width: 84, height: 149, objectFit: 'cover', borderRadius: 8,
+                background: '#000', display: 'block', cursor: 'pointer',
+              }}
+            />
+            <span
+              className="font-x"
+              title="Xoá"
+              onClick={(e) => handleDelete(c.file, e)}
+              style={{
+                position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,.6)',
+                color: '#fff', borderRadius: '50%', width: 18, height: 18,
+                lineHeight: '18px', textAlign: 'center', fontSize: 11, cursor: 'pointer',
+              }}
+            >✕</span>
+          </div>
         ))}
       </div>
 

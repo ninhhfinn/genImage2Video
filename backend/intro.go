@@ -265,6 +265,20 @@ func listIntrosHandler() http.HandlerFunc {
 	}
 }
 
+// ─── GET /api/intro-file?name=<name> — serve clip để FE xem trước ───────────
+
+func introFileHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p := resolveIntroPath(r.URL.Query().Get("name"))
+		if p == "" {
+			http.Error(w, "not found", 404)
+			return
+		}
+		w.Header().Set("Content-Type", "video/mp4")
+		http.ServeFile(w, r, p) // hỗ trợ range → <video> tua/xem trước được
+	}
+}
+
 // ─── POST /api/delete-intro {"intro":"<name>"} ──────────────────────────────
 
 func deleteIntroHandler() http.HandlerFunc {
