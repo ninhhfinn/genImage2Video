@@ -36,8 +36,10 @@ function VoicePreview({ provider, voice }) {
     if (busy) return
     setBusy(true)
     try {
-      const url = `/api/tts-preview?provider=${encodeURIComponent(provider)}&voice=${encodeURIComponent(voice || '')}`
-      const res = await fetch(url)
+      // _=Date.now(): né HTTP cache của browser — audio preview từng bị cache
+      // max-age=3600 nên sửa model TTS xong bấm nghe thử vẫn ra audio cũ.
+      const url = `/api/tts-preview?provider=${encodeURIComponent(provider)}&voice=${encodeURIComponent(voice || '')}&_=${Date.now()}`
+      const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) {
         const e = await res.json().catch(() => ({}))
         alert('Nghe thử lỗi: ' + (e.error || res.status))

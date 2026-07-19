@@ -464,7 +464,9 @@ func ttsPreviewHandler() http.HandlerFunc {
 		} else {
 			w.Header().Set("Content-Type", "audio/mpeg")
 		}
-		w.Header().Set("Cache-Control", "max-age=3600")
+		// no-store: URL không chứa model → browser cache sẽ phát audio cũ khi
+		// đổi model TTS. Cache đĩa phía server (theo key có model) là đủ nhanh.
+		w.Header().Set("Cache-Control", "no-store")
 		w.Write(data)
 	}
 }
