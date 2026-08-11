@@ -110,6 +110,14 @@ function slashAmenities(listing) {
   return parts.slice(1)
 }
 
+// overnightPrice: giá qua đêm rút gọn "349k" — dùng ĐÚNG field listing.price mà
+// card phòng hiển thị "…đ/đêm" (khớp với những gì người dùng thấy khi chọn phòng).
+function overnightPrice(listing) {
+  const n = listing?.price || 0
+  if (!n) return ''
+  return n >= 1000 ? Math.round(n / 1000) + 'k' : String(n)
+}
+
 export default function App() {
   const [toasts, toast]           = useToast()
   const [uploadedCount, setCount] = useState(0)
@@ -440,6 +448,7 @@ export default function App() {
         template: 'valentine',
         amenities: slashAmenities(activeListing),
         badge: overrides.badge || '',
+        price: overnightPrice(activeListing),
       })
       if (data.error) throw new Error(data.error)
       setExcelUrl(data.url)
@@ -680,6 +689,7 @@ export default function App() {
               onSaveImages={saveThumbImagesFile}
               savingImages={savingImages}
               excelSavedInfo={excelSavedInfo}
+              thumbTemplate={settings.thumbTemplate || ''}
             />
             <HistoryPanel refresh={histRefresh}/>
             <ThumbnailHistoryPanel refresh={thumbRefresh}/>

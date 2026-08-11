@@ -483,6 +483,7 @@ func excelThumbnailHandler(outputDir string) http.HandlerFunc {
 			ValBadge:  strings.TrimSpace(r.FormValue("badge")),
 			ValTitle:  firstNonEmpty(textSerif, strings.TrimSpace(r.FormValue("title_line"))),
 			ValScript: firstNonEmpty(textScript, strings.TrimSpace(r.FormValue("script_line"))),
+			ValPrice:  strings.TrimSpace(r.FormValue("price")),
 		}
 		data, err := buildThumbnailImage(cfg, photos)
 		if err != nil {

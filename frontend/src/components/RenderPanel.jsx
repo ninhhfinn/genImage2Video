@@ -15,7 +15,7 @@ function downloadUrlToDisk(url, filename) {
 export function RenderPanel({ canRender, onRender, rendering, done, pct, progText, status, error, queue, isQueueMode,
   batchMode = 'both', canThumbnail, onThumbnail, thumbBusy, thumbUrl, thumbErr,
   onExcelThumbnail, excelBusy, excelUrl, excelErr,
-  onSaveImages, savingImages, excelSavedInfo }) {
+  onSaveImages, savingImages, excelSavedInfo, thumbTemplate = '' }) {
   const imageInputRef = useRef(null)
   const textInputRef  = useRef(null)
   const [lastTextFile, setLastTextFile] = useState(null)
@@ -101,86 +101,83 @@ export function RenderPanel({ canRender, onRender, rendering, done, pct, progTex
         </button>
       )}
 
-      {/* ── Thumbnail (ảnh collage tĩnh) ── */}
+      {/* ── Thumbnail (ảnh bìa) ── */}
       <div style={{marginTop:6,paddingTop:12,borderTop:'1px solid var(--border)'}}>
         <div className="plabel" style={{marginBottom:8}}>Thumbnail (ảnh bìa)</div>
-        <button className="btn btn-outline btn-full" onClick={onThumbnail} disabled={!canThumbnail||thumbBusy}>
-          {thumbBusy
-            ? <><span className="spin">⟳</span> Đang tạo ảnh...</>
-            : 'Tạo Thumbnail'}
-        </button>
-        {thumbErr && <div style={{color:'var(--red)',fontSize:11,marginTop:6}}>{thumbErr}</div>}
-        {thumbUrl && (
-          <div style={{marginTop:10}}>
-            <img
-              src={thumbUrl}
-              alt="thumbnail"
-              style={{width:'100%',borderRadius:'var(--r)',border:'1px solid var(--border)',display:'block'}}
-            />
-            <a
-              className="btn btn-gold btn-full"
-              href={thumbUrl}
-              download="thumbnail.jpg"
-              style={{marginTop:8,textDecoration:'none',textAlign:'center'}}
-            >
-              Tải thumbnail ↓
-            </a>
+
+        {thumbTemplate !== 'valentine' ? (
+          /* Template thường: tạo từ ảnh đã upload + listing (giữ nguyên như cũ) */
+          <>
+            <button className="btn btn-outline btn-full" onClick={onThumbnail} disabled={!canThumbnail||thumbBusy}>
+              {thumbBusy ? <><span className="spin">⟳</span> Đang tạo ảnh...</> : 'Tạo Thumbnail'}
+            </button>
+            {thumbErr && <div style={{color:'var(--red)',fontSize:11,marginTop:6}}>{thumbErr}</div>}
+            {thumbUrl && (
+              <div style={{marginTop:10}}>
+                <img src={thumbUrl} alt="thumbnail"
+                  style={{width:'100%',borderRadius:'var(--r)',border:'1px solid var(--border)',display:'block'}} />
+                <a className="btn btn-gold btn-full" href={thumbUrl} download="thumbnail.jpg"
+                  style={{marginTop:8,textDecoration:'none',textAlign:'center'}}>Tải thumbnail ↓</a>
+              </div>
+            )}
+          </>
+        ) : (
+          /* Template Valentine: tạo qua Excel (2 file) */
+          <div>
+            <div style={{color:'var(--muted)',fontSize:11,marginBottom:8}}>
+              Template <b>Valentine</b> — tạo từ Excel: lưu file ảnh + nhãn (1 lần), rồi chọn file chữ (serif + script).
+            </div>
+
+            {/* Bước 1: file ảnh + nhãn — lưu 1 lần, dùng lại */}
+            <div style={{color:'var(--muted)',fontSize:11,marginBottom:4}}>
+              <b>File ảnh + nhãn</b> — cột A = nhãn, cột còn lại = ảnh (chèn ảnh vào ô). Lưu 1 lần, dùng lại nhiều lần.
+            </div>
+            <input ref={imageInputRef} type="file" accept=".xlsx" style={{display:'none'}}
+              onChange={e => { const f = e.target.files?.[0]; if (f) onSaveImages?.(f); e.target.value='' }} />
+            <button className="btn btn-outline btn-full" onClick={()=>imageInputRef.current?.click()} disabled={savingImages}>
+              {savingImages ? <><span className="spin">⟳</span> Đang lưu...</> : '📁 Chọn & lưu file ảnh + nhãn'}
+            </button>
+            {excelSavedInfo
+              ? <div style={{color:'var(--green,#3fb950)',fontSize:11,marginTop:5}}>
+                  ✓ Đã lưu{excelSavedInfo.fromServer ? ' (từ lần trước)' : ''}: {excelSavedInfo.images} ảnh, {excelSavedInfo.labels} nhãn
+                </div>
+              : <div style={{color:'var(--muted)',fontSize:11,marginTop:5}}>Chưa có file ảnh — hãy lưu file ảnh trước khi tạo.</div>}
+
+            {/* Bước 2: file chữ (serif + script) → tạo thumbnail */}
+            <div style={{color:'var(--muted)',fontSize:11,margin:'12px 0 4px'}}>
+              <b>File chữ</b> — cột A = dòng serif (LIST HOMESTAY), cột B = script (Valentine). Bốc ngẫu nhiên mỗi cột.
+            </div>
+            <input ref={textInputRef} type="file" accept=".xlsx" style={{display:'none'}}
+              onChange={e => { const f = e.target.files?.[0]; if (f) { setLastTextFile(f); onExcelThumbnail?.(f, { badge: vBadge }) } e.target.value='' }} />
+            <button className="btn btn-outline btn-full" onClick={()=>textInputRef.current?.click()} disabled={excelBusy || !excelSavedInfo}>
+              {excelBusy ? <><span className="spin">⟳</span> Đang tạo ảnh...</> : '📄 Chọn file chữ & tạo thumbnail'}
+            </button>
+
+            {excelErr && <div style={{color:'var(--red)',fontSize:11,marginTop:6}}>{excelErr}</div>}
+            {excelUrl && (
+              <div style={{marginTop:10}}>
+                <img src={excelUrl} alt="thumbnail-excel"
+                  style={{width:'100%',borderRadius:'var(--r)',border:'1px solid var(--border)',display:'block'}} />
+
+                {/* Sửa tay địa chỉ + tạo lại (dùng lại file chữ vừa chọn) */}
+                <div style={{marginTop:10,padding:'10px 10px 12px',border:'1px solid var(--border)',borderRadius:'var(--r)'}}>
+                  <label style={{display:'block',fontSize:11,color:'var(--muted)',marginBottom:2}}>Địa chỉ (badge)</label>
+                  <input className="inp" value={vBadge} placeholder="(tự động: Quận + Tỉnh)"
+                    onChange={e=>setVBadge(e.target.value)} style={{marginBottom:10}} />
+                  <button className="btn btn-outline btn-full" disabled={excelBusy || !excelSavedInfo}
+                    onClick={() => onExcelThumbnail?.(lastTextFile, { badge: vBadge })}>
+                    {excelBusy ? <><span className="spin">⟳</span> Đang tạo lại...</> : '🔄 Tạo lại'}
+                  </button>
+                </div>
+
+                <a className="btn btn-gold btn-full" href={excelUrl} download="thumbnail-excel.jpg"
+                  style={{marginTop:8,textDecoration:'none',textAlign:'center'}}>
+                  Tải thumbnail ↓
+                </a>
+              </div>
+            )}
           </div>
         )}
-
-        {/* ── Thumbnail từ Excel (2 file: ảnh+nhãn đã lưu, chữ serif+script) ── */}
-        <div style={{marginTop:14,paddingTop:12,borderTop:'1px dashed var(--border)'}}>
-          <div className="plabel" style={{marginBottom:6}}>Tạo thumbnail từ Excel</div>
-
-          {/* Bước 1: file ảnh + nhãn — lưu 1 lần, dùng lại */}
-          <div style={{color:'var(--muted)',fontSize:11,marginBottom:4}}>
-            <b>File ảnh + nhãn</b> — cột A = nhãn, cột còn lại = ảnh (chèn ảnh vào ô). Lưu 1 lần, dùng lại nhiều lần.
-          </div>
-          <input ref={imageInputRef} type="file" accept=".xlsx" style={{display:'none'}}
-            onChange={e => { const f = e.target.files?.[0]; if (f) onSaveImages?.(f); e.target.value='' }} />
-          <button className="btn btn-outline btn-full" onClick={()=>imageInputRef.current?.click()} disabled={savingImages}>
-            {savingImages ? <><span className="spin">⟳</span> Đang lưu...</> : '📁 Chọn & lưu file ảnh + nhãn'}
-          </button>
-          {excelSavedInfo
-            ? <div style={{color:'var(--green,#3fb950)',fontSize:11,marginTop:5}}>
-                ✓ Đã lưu{excelSavedInfo.fromServer ? ' (từ lần trước)' : ''}: {excelSavedInfo.images} ảnh, {excelSavedInfo.labels} nhãn
-              </div>
-            : <div style={{color:'var(--muted)',fontSize:11,marginTop:5}}>Chưa có file ảnh — hãy lưu file ảnh trước khi tạo.</div>}
-
-          {/* Bước 2: file chữ (serif + script) → tạo thumbnail */}
-          <div style={{color:'var(--muted)',fontSize:11,margin:'12px 0 4px'}}>
-            <b>File chữ</b> — cột A = dòng serif (LIST HOMESTAY), cột B = script (Valentine). Bốc ngẫu nhiên mỗi cột.
-          </div>
-          <input ref={textInputRef} type="file" accept=".xlsx" style={{display:'none'}}
-            onChange={e => { const f = e.target.files?.[0]; if (f) { setLastTextFile(f); onExcelThumbnail?.(f, { badge: vBadge }) } e.target.value='' }} />
-          <button className="btn btn-outline btn-full" onClick={()=>textInputRef.current?.click()} disabled={excelBusy || !excelSavedInfo}>
-            {excelBusy ? <><span className="spin">⟳</span> Đang tạo ảnh...</> : '📄 Chọn file chữ & tạo thumbnail'}
-          </button>
-
-          {excelErr && <div style={{color:'var(--red)',fontSize:11,marginTop:6}}>{excelErr}</div>}
-          {excelUrl && (
-            <div style={{marginTop:10}}>
-              <img src={excelUrl} alt="thumbnail-excel"
-                style={{width:'100%',borderRadius:'var(--r)',border:'1px solid var(--border)',display:'block'}} />
-
-              {/* Sửa tay địa chỉ + tạo lại (dùng lại file chữ vừa chọn) */}
-              <div style={{marginTop:10,padding:'10px 10px 12px',border:'1px solid var(--border)',borderRadius:'var(--r)'}}>
-                <label style={{display:'block',fontSize:11,color:'var(--muted)',marginBottom:2}}>Địa chỉ (badge)</label>
-                <input className="inp" value={vBadge} placeholder="(tự động: Quận + Tỉnh)"
-                  onChange={e=>setVBadge(e.target.value)} style={{marginBottom:10}} />
-                <button className="btn btn-outline btn-full" disabled={excelBusy || !excelSavedInfo}
-                  onClick={() => onExcelThumbnail?.(lastTextFile, { badge: vBadge })}>
-                  {excelBusy ? <><span className="spin">⟳</span> Đang tạo lại...</> : '🔄 Tạo lại'}
-                </button>
-              </div>
-
-              <a className="btn btn-gold btn-full" href={excelUrl} download="thumbnail-excel.jpg"
-                style={{marginTop:8,textDecoration:'none',textAlign:'center'}}>
-                Tải thumbnail ↓
-              </a>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   )

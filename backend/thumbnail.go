@@ -66,10 +66,11 @@ type ThumbnailConfig struct {
 	PriceTable []ThumbPriceRow // bảng giá cho template "valey"
 	ListingID  string          // dòng "Link ID" cho template "tiger"
 
-	// Override nhập tay cho template "valentine" (rỗng = dùng mặc định/tự động).
+	// Override nhấp tay cho template "valentine" (rỗng = dùng mặc định/tự động).
 	ValBadge  string // badge (mặc định: Quận/Huyện + Tỉnh từ Address)
 	ValTitle  string // dòng serif (mặc định "LIST HOMESTAY")
 	ValScript string // chữ script (mặc định "Valentine")
+	ValPrice  string // giá qua đêm (VD "299k") → "Qua đêm chỉ từ 299k"; rỗng = ẩn
 }
 
 // ThumbPriceRow = 1 dòng bảng giá Valey (khung giờ + giá trong tuần / cuối tuần).

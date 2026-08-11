@@ -201,6 +201,28 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
           onChange={(v) => set('template')(v)}
         />
 
+        {/* Chọn template thumbnail (ảnh bìa) ngay dưới template video */}
+        <div className="field">
+          <label className="flabel">Kiểu thumbnail (ảnh bìa)</label>
+          <div className="tpl-grid">
+            {THUMB_TPLS.map(([v, label, img]) => (
+              <button
+                key={v || 'classic'}
+                type="button"
+                className={`tpl-card ratio-thumb${thumbTemplate===v?' on':''}`}
+                onClick={()=>set('thumbTemplate')(v)}
+              >
+                {img
+                  ? <img src={img} alt={label} loading="lazy" />
+                  : <span className="tpl-dice">🎲</span>}
+                <span className="tpl-name">{label}</span>
+                <span className="tpl-check">✓</span>
+              </button>
+            ))}
+          </div>
+          <div className="sect-sub">{thumbDesc}</div>
+        </div>
+
         {/* Hiệu ứng chuyển động (motion mode) — độc lập với Thuyết minh AI */}
         <div className="field">
           <label className="flabel">Hiệu ứng</label>

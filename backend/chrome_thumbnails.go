@@ -286,6 +286,9 @@ func chromeThumbBody(name string, cfg ThumbnailConfig, photos []string) string {
 		// text nạp font ổn định như các template canva. Viền trắng: text-stroke +
 		// paint-order (stroke nằm dưới fill → viền lộ ra ngoài nét chữ).
 		c.WriteString(`<div style="font-family:'ParisienneVB','Parisienne',cursive;font-size:128px;line-height:1;color:#e24b6e;-webkit-text-stroke:7px #ffffff;paint-order:stroke fill;text-shadow:0 3px 7px rgba(0,0,0,.45);display:inline-block;transform:scaleX(.92);transform-origin:center;position:relative;z-index:6">` + esc(scriptLine) + `</div>`)
+		if p := strings.TrimSpace(cfg.ValPrice); p != "" {
+			c.WriteString(`<div style="margin-top:16px"><span style="display:inline-block;background:#e24b6e;color:#ffffff;font-family:'Be Vietnam Pro',sans-serif;font-weight:700;font-size:30px;letter-spacing:.5px;padding:7px 24px;border-radius:24px;border:2.5px solid #ffffff;box-shadow:0 6px 16px rgba(0,0,0,.4)">Qua đêm chỉ từ ` + esc(p) + `</span></div>`)
+		}
 		c.WriteString(`</div>`)
 		b.WriteString(c.String())
 

@@ -44,7 +44,7 @@ export const getThumbImagesStatus = () =>
 // Tạo thumbnail: ảnh+nhãn lấy từ file ĐÃ LƯU trên server; textFile (tuỳ chọn) =
 // file chữ 2 cột (serif | script). badge override nhập tay (rỗng = auto).
 export const renderExcelThumbnail = (
-  { textFile = null, address = '', template = 'valentine', amenities = [], badge = '' } = {},
+  { textFile = null, address = '', template = 'valentine', amenities = [], badge = '', price = '' } = {},
 ) => {
   const fd = new FormData()
   if (textFile) fd.append('excel_text', textFile)
@@ -52,6 +52,7 @@ export const renderExcelThumbnail = (
   fd.append('template', template)
   amenities.forEach(a => { if (a) fd.append('amenity', a) })
   fd.append('badge', badge)
+  fd.append('price', price)
   return api.post('/render-thumbnail-excel', fd, { timeout: 120000 })
 }
 
