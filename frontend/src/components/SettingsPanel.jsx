@@ -83,7 +83,7 @@ const THUMB_TPLS = [
   ['strip',     'Strip',     '/templates/thumb-strip.jpg'],
   ['creamgrid', 'CreamGrid', '/templates/thumb-creamgrid.jpg'],
   ['filmstrip', 'Filmstrip', '/templates/thumb-filmstrip.jpg'],
-  ['valentine', 'Valentine', '/templates/thumb-valentine.jpg?v=2'],
+  ['valentine', 'Valentine', '/templates/thumb-valentine.jpg?v=3'],
   ['canva1',    'Canva 1',   '/templates/thumb-canva1.jpg'],
   ['canva2',    'Canva 2',   '/templates/thumb-canva2.jpg'],
   ['canva3',    'Canva 3',   '/templates/thumb-canva3.jpg'],
