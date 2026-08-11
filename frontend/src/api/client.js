@@ -28,6 +28,33 @@ export const startRender = (body) =>
 export const renderThumbnail = (body) =>
   api.post('/render-thumbnail', body)
 
+// Thumbnail từ Excel: upload file .xlsx (ảnh nhúng + cột nhãn) → random 4 ảnh + 4
+// nhãn, tỉnh lấy từ address listing. Trả { url }.
+// Lưu "file ảnh + nhãn" lên server (upload 1 lần, dùng lại nhiều lần).
+export const saveThumbImages = (file) => {
+  const fd = new FormData()
+  fd.append('excel', file)
+  return api.post('/save-thumb-images', fd, { timeout: 120000 })
+}
+
+// Trạng thái file ảnh đã lưu (khi mở app): { saved, images, labels }.
+export const getThumbImagesStatus = () =>
+  api.get('/save-thumb-images').then(r => r.data)
+
+// Tạo thumbnail: ảnh+nhãn lấy từ file ĐÃ LƯU trên server; textFile (tuỳ chọn) =
+// file chữ 2 cột (serif | script). badge override nhập tay (rỗng = auto).
+export const renderExcelThumbnail = (
+  { textFile = null, address = '', template = 'valentine', amenities = [], badge = '' } = {},
+) => {
+  const fd = new FormData()
+  if (textFile) fd.append('excel_text', textFile)
+  fd.append('address', address)
+  fd.append('template', template)
+  amenities.forEach(a => { if (a) fd.append('amenity', a) })
+  fd.append('badge', badge)
+  return api.post('/render-thumbnail-excel', fd, { timeout: 120000 })
+}
+
 export const getStatus = () =>
   api.get('/status')
 

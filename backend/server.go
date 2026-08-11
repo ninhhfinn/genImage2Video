@@ -120,6 +120,8 @@ func startWebServer(port int) error {
 	mux.HandleFunc("/api/select-listing", selectListingHandler(uploadDir))
 	mux.HandleFunc("/api/templates", listTemplatesHandler())
 	mux.HandleFunc("/api/render-thumbnail", thumbnailHandler(uploadDir, outputDir))
+	mux.HandleFunc("/api/render-thumbnail-excel", excelThumbnailHandler(outputDir))
+	mux.HandleFunc("/api/save-thumb-images", saveThumbImagesHandler(outputDir))
 	mux.HandleFunc("/api/thumbnail-file", thumbnailFileHandler(outputDir))
 	mux.HandleFunc("/api/thumbnail-history", thumbnailHistoryHandler())
 

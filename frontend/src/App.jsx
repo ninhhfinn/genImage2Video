@@ -6,7 +6,7 @@ import SourcePanel    from './components/SourcePanel'
 import SettingsPanel  from './components/SettingsPanel'
 import ScriptPanel    from './components/ScriptPanel'
 import { RenderPanel, HistoryPanel, ThumbnailHistoryPanel } from './components/RenderPanel'
-import { selectListing, renderThumbnail } from './api/client'
+import { selectListing, renderThumbnail, renderExcelThumbnail, saveThumbImages, getThumbImagesStatus } from './api/client'
 
 const DEFAULT_SETTINGS = {
   mode: 'kenburns',
@@ -98,6 +98,18 @@ function curateAmenities(apiList) {
     .map(({ label }) => label)
 }
 
+// slashAmenities tách tiện ích từ TÊN PHÒNG, ngăn bởi "|" HOẶC "/", GIỮ NGUYÊN cả
+// cụm (không whitelist, không tách lẻ). Bỏ đoạn đầu (mã phòng/loại). Chọn field
+// name/nickname NÀO có dấu ngăn (name thường đầy đủ, nickname là mã ngắn "XD 412").
+// VD name "XD 412 | Căn hộ khép kín | Bếp | TV Netflix | Thang máy | Gửi xe máy miễn
+// phí" → ["Căn hộ khép kín","Bếp","TV Netflix","Thang máy","Gửi xe máy miễn phí"].
+function slashAmenities(listing) {
+  const cands = [listing?.name, listing?.nickname].filter(Boolean)
+  const raw = cands.find(s => /[|/]/.test(s)) || cands[0] || ''
+  const parts = raw.split(/[|/]/).map(s => s.trim()).filter(Boolean)
+  return parts.slice(1)
+}
+
 export default function App() {
   const [toasts, toast]           = useToast()
   const [uploadedCount, setCount] = useState(0)
@@ -120,6 +132,11 @@ export default function App() {
   const [thumbUrl, setThumbUrl]   = useState('')
   const [thumbBusy, setThumbBusy] = useState(false)
   const [thumbErr, setThumbErr]   = useState('')
+  const [excelUrl, setExcelUrl]   = useState('')
+  const [excelBusy, setExcelBusy] = useState(false)
+  const [excelErr, setExcelErr]   = useState('')
+  const [savingImages, setSavingImages] = useState(false)
+  const [excelSavedInfo, setExcelSavedInfo] = useState(null) // {images,labels} | null
 
   // Kịch bản thuyết minh user đã duyệt/sửa từ ScriptPanel ({segments:[...]})
   // — gửi kèm request render để backend dùng đúng bản này thay vì gọi Claude.
@@ -393,6 +410,48 @@ export default function App() {
     }
   }, [buildThumbnailCfg, activeListing, toast])
 
+  // Khi mở app: kiểm tra đã có file ảnh lưu trên server chưa (tránh ra ảnh cũ mà không biết).
+  useEffect(() => {
+    getThumbImagesStatus()
+      .then(d => { if (d?.saved) setExcelSavedInfo({ images: d.images, labels: d.labels, fromServer: true }) })
+      .catch(() => {})
+  }, [])
+
+  const saveThumbImagesFile = useCallback(async (file) => {
+    setSavingImages(true)
+    try {
+      const { data } = await saveThumbImages(file)
+      if (data.error) throw new Error(data.error)
+      setExcelSavedInfo({ images: data.images, labels: data.labels })
+      toast(`Đã lưu file ảnh ✓ (${data.images} ảnh, ${data.labels} nhãn)`, 'ok')
+    } catch (e) {
+      toast('Lỗi lưu file ảnh: ' + (e?.response?.data?.error || e.message), 'err')
+    } finally {
+      setSavingImages(false)
+    }
+  }, [toast])
+
+  const generateExcelThumbnail = useCallback(async (textFile, overrides = {}) => {
+    setExcelBusy(true); setExcelErr(''); setExcelUrl('')
+    try {
+      const { data } = await renderExcelThumbnail({
+        textFile: textFile || null,
+        address: activeListing?.address || '',
+        template: 'valentine',
+        amenities: slashAmenities(activeListing),
+        badge: overrides.badge || '',
+      })
+      if (data.error) throw new Error(data.error)
+      setExcelUrl(data.url)
+      toast('Đã tạo thumbnail ✓', 'ok')
+    } catch (e) {
+      setExcelErr(e?.response?.data?.error || e.message)
+      toast('Lỗi tạo thumbnail', 'err')
+    } finally {
+      setExcelBusy(false)
+    }
+  }, [activeListing, toast])
+
   const handleReady = (items) => {
     const first = items[0]
     setCount(first.count || 0)
@@ -614,6 +673,13 @@ export default function App() {
               thumbBusy={thumbBusy}
               thumbUrl={thumbUrl}
               thumbErr={thumbErr}
+              onExcelThumbnail={generateExcelThumbnail}
+              excelBusy={excelBusy}
+              excelUrl={excelUrl}
+              excelErr={excelErr}
+              onSaveImages={saveThumbImagesFile}
+              savingImages={savingImages}
+              excelSavedInfo={excelSavedInfo}
             />
             <HistoryPanel refresh={histRefresh}/>
             <ThumbnailHistoryPanel refresh={thumbRefresh}/>

@@ -11,6 +11,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"image/jpeg"
 	"math"
@@ -24,10 +25,38 @@ import (
 	"github.com/disintegration/imaging"
 )
 
+// dataFontFace nhúng 1 file font thành @font-face base64 (data URI). Dùng cho font
+// hay bị headless Chrome chụp-trước-khi-nạp qua file:// (VD Parisienne): data URI có
+// sẵn ngay lúc layout nên KHÔNG còn đua tải → hết rớt về Comic Sans.
+func dataFontFace(family, file string) string {
+	b, err := os.ReadFile(filepath.Join(assetsDir(), "fonts", file))
+	if err != nil {
+		return ""
+	}
+	enc := base64.StdEncoding.EncodeToString(b)
+	return fmt.Sprintf("@font-face{font-family:'%s';src:url('data:font/ttf;base64,%s') format('truetype');font-weight:400;font-style:normal;font-display:block}", family, enc)
+}
+
+// valentineFontCSS trả @font-face base64 cho font riêng của template "valentine"
+// (chỉ Parisienne — Playfair/Be Vietnam Pro nạp file:// đã ổn).
+func valentineFontCSS() string {
+	return dataFontFace("ParisienneVB", "Parisienne-Regular.ttf")
+}
+
 // chromeThumbNames — template thumbnail render bằng Chrome.
 var chromeThumbNames = map[string]bool{
 	"canva1": true, "canva2": true, "canva3": true,
 	"canva4": true, "canva5": true, "canva6": true,
+	"valentine": true,
+}
+
+// thumbStageWH trả kích thước khung render cho từng template. Canva mặc định 9:16
+// (1080×1920); "valentine" dùng 3:4 (1080×1440) đúng như bản thiết kế đã duyệt.
+func thumbStageWH(name string) (int, int) {
+	if strings.ToLower(strings.TrimSpace(name)) == "valentine" {
+		return 1080, 1440
+	}
+	return 1080, 1920
 }
 
 // thumbShortAddress rút địa chỉ gọn cho thumbnail (mockup: "Đường Nguyễn Khang,
@@ -215,10 +244,91 @@ func chromeThumbBody(name string, cfg ThumbnailConfig, photos []string) string {
 		b.WriteString(el("top:925px;left:0;width:1080px;text-align:center;font-family:'Poppins',sans-serif;font-weight:500;"+priceCSS,
 			`<span style="display:inline-block;background:rgba(255,255,255,.16);border:1.5px solid rgba(255,255,255,.45);border-radius:28px;padding:27px 40px 25px;white-space:pre-line">`+prices+`</span>`))
 
+	case "valentine": // List Homestay Valentine — lưới 2×2 (3:4), badge tỉnh, tiêu
+		// đề Playfair "LIST HOMESTAY" + "Valentine" Parisienne viền trắng, 4 nhãn tem.
+		b.WriteString(thumbImg(thumbPhoto(photos, 0), "top:0;left:0;width:540px;height:720px"))
+		b.WriteString(thumbImg(thumbPhoto(photos, 1), "top:0;left:540px;width:540px;height:720px"))
+		b.WriteString(thumbImg(thumbPhoto(photos, 2), "top:720px;left:0;width:540px;height:720px"))
+		b.WriteString(thumbImg(thumbPhoto(photos, 3), "top:720px;left:540px;width:540px;height:720px"))
+		// veil xuyên tâm cho chữ giữa nổi
+		b.WriteString(`<div style="position:absolute;inset:0;background:radial-gradient(120% 70% at 50% 46%,rgba(0,0,0,0) 30%,rgba(0,0,0,.40) 100%)"></div>`)
+
+		// 4 nhãn tem tiện ích (so le, nghiêng), font Be Vietnam Pro cho đúng dấu.
+		tags := valentineTags(cfg.Amenities)
+		tagBase := "position:absolute;display:inline-block;width:max-content;background:#e8617a;color:#ffffff;" +
+			"font-family:'Be Vietnam Pro',sans-serif;font-weight:700;font-size:22px;line-height:1.15;" +
+			"padding:5px 13px;border-radius:24px;border:2.5px solid #ffffff;box-shadow:0 6px 16px rgba(0,0,0,.45);white-space:nowrap;z-index:6;"
+		b.WriteString(`<div style="` + tagBase + `top:31%;left:9%;transform:rotate(-6deg)">` + esc(tags[0]) + `</div>`)
+		b.WriteString(`<div style="` + tagBase + `top:31%;right:8%;transform:rotate(5deg)">` + esc(tags[1]) + `</div>`)
+		b.WriteString(`<div style="` + tagBase + `top:57%;left:9%;transform:rotate(9deg)">` + esc(tags[2]) + `</div>`)
+		b.WriteString(`<div style="` + tagBase + `top:57%;right:5%;transform:rotate(-9deg)">` + esc(tags[3]) + `</div>`)
+
+		// Khối chữ giữa: badge (nền trắng chữ hồng) + LIST HOMESTAY + Valentine.
+		// 3 phần đều cho phép nhập tay (ValBadge/ValTitle/ValScript); rỗng = mặc định.
+		badge := valentineProvince(cfg.Address)
+		if v := strings.TrimSpace(cfg.ValBadge); v != "" {
+			badge = strings.ToUpper(v)
+		}
+		titleLine := "LIST HOMESTAY"
+		if v := strings.TrimSpace(cfg.ValTitle); v != "" {
+			titleLine = v
+		}
+		scriptLine := "Valentine"
+		if v := strings.TrimSpace(cfg.ValScript); v != "" {
+			scriptLine = v
+		}
+		var c strings.Builder
+		c.WriteString(`<div style="position:absolute;left:0;right:0;top:46%;transform:translateY(-50%);text-align:center;z-index:5">`)
+		c.WriteString(`<div style="display:inline-block;background:#ffffff;color:#e24b6e;font-family:'Be Vietnam Pro',sans-serif;font-weight:700;letter-spacing:2.5px;font-size:40px;line-height:1.05;padding:5px 26px;border-radius:40px;box-shadow:0 6px 20px rgba(0,0,0,.4);margin-bottom:14px">` + esc(badge) + `</div>`)
+		c.WriteString(`<div style="font-family:'Playfair Display',serif;color:#ffffff;font-size:62px;letter-spacing:8px;font-weight:400;display:block;transform:scaleY(1.5);transform-origin:center;text-shadow:0 2px 10px rgba(0,0,0,.6);margin:20px 0 -38px;position:relative;z-index:5">` + esc(titleLine) + `</div>`)
+		// "Valentine" dạng HTML text (KHÔNG dùng SVG): web-font Parisienne trong SVG
+		// hay bị Chrome headless chụp trước khi nạp xong → rớt về Comic Sans. HTML
+		// text nạp font ổn định như các template canva. Viền trắng: text-stroke +
+		// paint-order (stroke nằm dưới fill → viền lộ ra ngoài nét chữ).
+		c.WriteString(`<div style="font-family:'ParisienneVB','Parisienne',cursive;font-size:128px;line-height:1;color:#e24b6e;-webkit-text-stroke:7px #ffffff;paint-order:stroke fill;text-shadow:0 3px 7px rgba(0,0,0,.45);display:inline-block;transform:scaleX(.92);transform-origin:center;position:relative;z-index:6">` + esc(scriptLine) + `</div>`)
+		c.WriteString(`</div>`)
+		b.WriteString(c.String())
+
 	default:
 		return ""
 	}
 	return b.String()
+}
+
+// valentineProvince rút TÊN TỈNH/THÀNH (đoạn cuối địa chỉ) cho badge template
+// "valentine", viết HOA. Rỗng → mặc định "HÀ NỘI".
+func valentineProvince(addr string) string {
+	var parts []string
+	for _, p := range strings.Split(cleanVideoAddress(addr), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			parts = append(parts, p)
+		}
+	}
+	n := len(parts)
+	if n == 0 {
+		return "HÀ NỘI"
+	}
+	prov := canonicalProvince(parts[n-1]) // tỉnh/thành có dấu chuẩn
+	if n == 1 {
+		return strings.ToUpper(prov)
+	}
+	// badge = Quận/Huyện + Tỉnh (VD "QUẬN 7 - HỒ CHÍ MINH", "ĐỐNG ĐA - HÀ NỘI")
+	district := strings.TrimSpace(parts[n-2])
+	return strings.ToUpper(district + " - " + prov)
+}
+
+// valentineTags trả đúng 4 nhãn tem: lấy tiện ích thật, thiếu thì bù mặc định.
+func valentineTags(amenities []string) [4]string {
+	def := [4]string{"Giường Kingsize", "Máy chiếu 4K", "Bếp đủ đồ", "Checkin không lễ tân"}
+	out := def
+	i := 0
+	for _, a := range amenities {
+		if a = strings.TrimSpace(a); a != "" && i < 4 {
+			out[i] = a
+			i++
+		}
+	}
+	return out
 }
 
 // Bóng chữ thumbnail: glow rất nhẹ + drop mềm cho tách nền (đã chốt qua vòng lặp).
@@ -233,10 +343,15 @@ func renderChromeThumbnail(cfg ThumbnailConfig, photos []string) ([]byte, error)
 	if body == "" {
 		return nil, fmt.Errorf("thumbnail chrome: template %q không hỗ trợ", name)
 	}
+	stageW, stageH := thumbStageWH(name)
+	extraFontCSS := ""
+	if name == "valentine" {
+		extraFontCSS = valentineFontCSS()
+	}
 	page := `<!doctype html><html><head><meta charset="utf-8"><style>` +
 		`*{margin:0;padding:0;box-sizing:border-box}html,body{background:#000}` +
-		fontFaceCSS() +
-		`.stage{width:1080px;height:1920px;position:relative;overflow:hidden;background:#111}` +
+		fontFaceCSS() + extraFontCSS +
+		fmt.Sprintf(`.stage{width:%dpx;height:%dpx;position:relative;overflow:hidden;background:#111}`, stageW, stageH) +
 		`img{display:block}` +
 		`</style></head><body><div class="stage">` + body + `</div>` + autofitScript + `</body></html>`
 
@@ -257,7 +372,7 @@ func renderChromeThumbnail(cfg ThumbnailConfig, photos []string) ([]byte, error)
 		"--headless", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
 		"--force-device-scale-factor=1", "--default-background-color=ff000000",
 		"--run-all-compositor-stages-before-draw", "--virtual-time-budget=6000",
-		"--window-size=1080,1920", "--user-data-dir=" + filepath.Join(tmpDir, "profile"),
+		fmt.Sprintf("--window-size=%d,%d", stageW, stageH), "--user-data-dir=" + filepath.Join(tmpDir, "profile"),
 		"--screenshot=" + outPath, "file://" + htmlPath,
 	}
 	if out, err := exec.CommandContext(ctx, chromeBin(), args...).CombinedOutput(); err != nil {

@@ -1,0 +1,113 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Preview — List Homestay Valentine (tái tạo template)</title>
+<style>
+  @font-face{
+    font-family:"Parisienne";
+    src:url("fonts/Parisienne-Regular.ttf") format("truetype");
+    font-weight:400; font-style:normal; font-display:swap;
+  }
+  @font-face{
+    font-family:"Playfair Display";
+    src:url("fonts/PlayfairDisplay-VF.ttf") format("truetype");
+    font-weight:400 900; font-style:normal; font-display:swap;
+  }
+  :root{
+    --pink:#e8617a; --pink-soft:#f6b8c6; --cream:#f3e7d8;
+    --ink:#2a2320;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#141010;color:#eee;font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;
+       display:flex;flex-direction:column;align-items:center;padding:26px 12px 60px}
+  h1{font-weight:700;font-size:19px;margin:6px 0 2px;text-align:center}
+  .sub{color:#a99; font-size:13px; margin:0 0 20px; text-align:center}
+
+  /* ------- KHUNG BÀI ĐĂNG 3:4 ------- */
+  .post{width:390px; aspect-ratio:3/4; position:relative; border-radius:14px; overflow:hidden;
+        box-shadow:0 14px 44px #000a; background:#000; font-family:"Segoe UI",system-ui,sans-serif}
+
+  /* lưới 2x2 ảnh nền */
+  .grid{position:absolute; inset:0; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:2px}
+  .grid img{width:100%; height:100%; object-fit:cover; display:block; filter:brightness(.92)}
+
+  /* lớp phủ tối nhẹ giữa để chữ nổi */
+  .veil{position:absolute; inset:0; background:radial-gradient(120% 70% at 50% 46%, #0000 30%, #0006 100%)}
+
+  /* icon loa tắt tiếng góc trên trái */
+  .mute{position:absolute; top:12px; left:12px; width:30px; height:30px; border-radius:50%;
+        background:#0007; color:#fff; display:flex; align-items:center; justify-content:center; font-size:15px}
+
+  /* ------- TIÊU ĐỀ GIỮA ------- */
+  .center{position:absolute; left:0; right:0; top:46%; transform:translateY(-50%); text-align:center; z-index:5}
+  .badge{display:inline-block; background:#fff; color:#e24b6e; font-weight:800; letter-spacing:1px;
+         font-size:17px; line-height:1.05; padding:2px 11px; border-radius:16px; box-shadow:0 4px 12px #0006; margin-bottom:6px}
+  .title{font-family:"Playfair Display",Georgia,serif; color:#fff;
+         font-size:27px; letter-spacing:1.5px; font-weight:400;
+         display:block; transform:scaleY(1.3); transform-origin:center;
+         text-shadow:0 2px 10px #0009; margin:8px 0 -30px; position:relative; z-index:5}
+  /* chữ Valentine dạng SVG: viền trắng BO TRÒN (stroke-linejoin:round) */
+  .script-svg{display:block; width:66%; max-width:225px; margin:0 auto; overflow:visible;
+              position:relative; z-index:6; filter:drop-shadow(0 3px 7px #0008)}
+  .script-svg text{font-family:"Parisienne","Monotype Corsiva",cursive; font-size:120px;
+                   fill:#e24b6e; stroke:#fff; stroke-width:4.5px;
+                   stroke-linejoin:round; stroke-linecap:round; stroke-miterlimit:2;
+                   paint-order:stroke fill}
+
+  /* ------- NHÃN TEM (sticker) 4 GÓC ------- */
+  .tag{position:absolute; z-index:6; display:inline-block; width:max-content;
+       background:var(--pink); color:#fff; font-weight:700; font-size:9.5px; line-height:1.15;
+       padding:2px 5px; border-radius:9px; border:1.5px solid #fff; box-shadow:0 3px 8px #0007; white-space:nowrap}
+  .t1{top:27%; left:15%;  transform:rotate(-6deg)}   /* Giường Kingsize */
+  .t2{top:27%; right:14%; transform:rotate(5deg)}    /* Máy chiếu 4K */
+  .t3{top:60%; left:15%;  transform:rotate(9deg)}    /* Bếp đủ đồ (ha ben phai) */
+  .t4{top:60%; right:6%;  transform:rotate(-9deg)}   /* Checkin không lễ tân (ha ben trai) */
+
+  /* chữ trang trí trong ảnh (S HOUSE) */
+  .shouse{position:absolute; right:6%; top:57%; color:#f1e9dd; font-weight:800; letter-spacing:1px; font-size:13px; z-index:4; text-shadow:0 1px 4px #0009}
+
+  /* ------- CAROUSEL DOTS + MŨI TÊN ------- */
+  .nav{position:absolute; left:0; right:0; bottom:64px; display:flex; align-items:center; justify-content:center; gap:8px; z-index:6; color:#fff}
+  .nav .arrow{opacity:.85; font-size:14px}
+  .dots{display:flex; gap:6px}
+  .dot{width:6px; height:6px; border-radius:50%; background:#fff8}
+  .dot.on{background:#fff; width:7px; height:7px}
+
+  /* ------- CAPTION DƯỚI ------- */
+  .caption{position:absolute; left:0; right:0; bottom:0; padding:14px 16px 16px;
+           background:linear-gradient(#0000, #000c 40%, #000e); z-index:6}
+  .caption .name{font-weight:800; font-size:16px; color:#fff}
+  .caption .name .cnt{color:#cfc4b8; font-weight:600}
+  .caption .desc{color:#e7ded4; font-size:13.5px; margin-top:3px}
+  .caption .desc .more{color:#b9ada0}
+
+  .legend{color:#a99; font-size:12.5px; margin-top:16px; max-width:400px; text-align:center}
+</style>
+
+<h1>Preview — “List Homestay Valentine” (tái tạo từ ảnh bạn gửi)</h1>
+<p class="sub">Bố cục: lưới 2×2 · badge HÀ NỘI · tiêu đề serif + script hồng · 4 nhãn tem tiện ích (đã bỏ caption &amp; thanh điều hướng nền tảng)</p>
+
+<div class="post">
+  <div class="grid">
+    <img src="_rooms/room01.jpg" alt="">
+    <img src="_rooms/room04.jpg" alt="">
+    <img src="_rooms/room06.jpg" alt="">
+    <img src="_rooms/room08.jpg" alt="">
+  </div>
+  <div class="veil"></div>
+
+  <div class="tag t1">Giường Kingsize</div>
+  <div class="tag t2">Máy chiếu 4K</div>
+  <div class="tag t3">Bếp đủ đồ</div>
+  <div class="tag t4">Checkin không lễ tân</div>
+
+  <div class="center">
+    <div class="badge">HÀ NỘI</div>
+    <div class="title">LIST HOMESTAY</div>
+    <svg class="script-svg" viewBox="0 0 420 150">
+      <text x="210" y="112" text-anchor="middle" textLength="330" lengthAdjust="spacingAndGlyphs">Valentine</text>
+    </svg>
+  </div>
+
+</div>
+
+<p class="legend">Ảnh nền đang dùng ảnh phòng mẫu trong <code>_rooms/</code> — thay bằng ảnh homestay thật là ra bài đăng hoàn chỉnh. Font script “Valentine” dùng font hệ thống; bản render chính thức của tool sẽ nhúng font điệu đà hơn.</p>

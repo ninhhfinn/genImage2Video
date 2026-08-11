@@ -102,6 +102,13 @@ func fontFaceCSS() string {
 		ff("Anton", "Anton-Regular.ttf", "400", "normal"),
 		ff("Kaushan Script", "KaushanScript-Regular.ttf", "400", "normal"),
 		ff("Francois One", "FrancoisOne-Regular.ttf", "400", "normal"),
+		// Font cho thumbnail "valentine" (List Homestay): Playfair Display (tiêu đề
+		// Didone thanh mảnh), Parisienne (chữ "Valentine" calligraphy), Be Vietnam
+		// Pro (badge tỉnh + nhãn tem — chuẩn dấu tiếng Việt).
+		ff("Playfair Display", "PlayfairDisplay-Variable.ttf", "400", "normal"),
+		ff("Parisienne", "Parisienne-Regular.ttf", "400", "normal"),
+		ff("Be Vietnam Pro", "BeVietnamPro-Regular.ttf", "400", "normal"),
+		ff("Be Vietnam Pro", "BeVietnamPro-Bold.ttf", "700", "normal"),
 	}, "")
 }
 

@@ -83,6 +83,7 @@ const THUMB_TPLS = [
   ['strip',     'Strip',     '/templates/thumb-strip.jpg'],
   ['creamgrid', 'CreamGrid', '/templates/thumb-creamgrid.jpg'],
   ['filmstrip', 'Filmstrip', '/templates/thumb-filmstrip.jpg'],
+  ['valentine', 'Valentine', '/templates/thumb-valentine.jpg'],
   ['canva1',    'Canva 1',   '/templates/thumb-canva1.jpg'],
   ['canva2',    'Canva 2',   '/templates/thumb-canva2.jpg'],
   ['canva3',    'Canva 3',   '/templates/thumb-canva3.jpg'],
@@ -187,6 +188,7 @@ export default function SettingsPanel({ settings, onChange, uploadedCount, apiAm
             strip: 'Tiêu đề trên cùng + dải 3 ảnh ngang + giá phía dưới.',
             creamgrid: 'Nền kem, chữ serif đỏ, lưới ảnh lệch cột + caption "Disco Room".',
             filmstrip: '3 dải ảnh xếp dọc, dải giữa phủ chữ (tiêu đề + tagline + giá).',
+            valentine: 'List Homestay Valentine: lưới 2×2, badge tỉnh, "LIST HOMESTAY" + "Valentine" viết tay hồng viền trắng, 4 nhãn tem tiện ích.',
           }[thumbTemplate]
           || 'Lưới 2×2 + khối chữ giữa. Valey có bảng giá Trong tuần/Cuối tuần (tự lấy từ prices_by_week).')
 
