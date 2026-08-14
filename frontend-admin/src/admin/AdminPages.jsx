@@ -109,7 +109,10 @@ export function BoardPage() {
 		setMsg('')
 		try {
 			const d = await api.syncSessions(14)
-			setMsg(`Đồng bộ xong: thêm ${d.created} ca mới, ${d.skipped} ca đã có sẵn.`)
+			setMsg(
+				`Đồng bộ xong: thêm ${d.created} ca mới, ${d.skipped} ca đã có sẵn.` +
+					(d.assigned ? ` Đã tự xếp người cho ${d.assigned} ca theo khu vực.` : ''),
+			)
 			await load(day)
 		} catch (e) {
 			setErr(e.message)
@@ -133,8 +136,10 @@ export function BoardPage() {
 				<div>
 					<h1>Ca dọn {dayLabel(day, today).toLowerCase()}</h1>
 					<p className="sub">
-						Ca sinh tự động từ lịch đặt phòng của Dayladau. Mỗi lượt khách trả phòng là một ca dọn kỹ — phòng cho
-						thuê theo giờ có thể nhiều ca trong ngày.
+						Ca sinh tự động từ lịch đặt phòng của Dayladau — không cần tạo tay. Mỗi lượt khách trả phòng là một ca
+						dọn kỹ; phòng cho thuê theo giờ có thể nhiều ca trong ngày.
+						<br />
+						<strong>Xếp người:</strong> chọn tên ở cột “Cô phụ trách” ngay trong bảng, lưu ngay khi chọn.
 					</p>
 				</div>
 				<div className="row-actions">
@@ -151,7 +156,7 @@ export function BoardPage() {
 
 			<div className="stats">
 				<Stat label="Chưa có người nhận" value={unassigned} tone={unassigned ? 'danger' : 'ok'}
-					sub={unassigned ? 'Cần xếp ngay' : 'Đã xếp hết'} />
+					sub={unassigned ? 'Chọn tên ở cột “Cô phụ trách”' : 'Đã xếp hết'} />
 				<Stat label="Quá giờ khách vào" value={late} tone={late ? 'danger' : 'ok'}
 					sub={late ? 'Gọi nhắc cô' : 'Đúng tiến độ'} />
 				<Stat label="Đang dọn" value={doing} />
@@ -198,7 +203,11 @@ export function BoardPage() {
 										</div>
 									</td>
 									<td>
-										<select value={s.staff_id || ''} onChange={(e) => assign(s.id, e.target.value)}>
+										<select
+											className={s.staff_id ? '' : 'select--todo'}
+											value={s.staff_id || ''}
+											onChange={(e) => assign(s.id, e.target.value)}
+										>
 											<option value="">— Chưa xếp —</option>
 											{staffs.map((x) => (
 												<option key={x.id} value={x.id}>

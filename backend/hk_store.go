@@ -450,6 +450,36 @@ func snapshotJSON(t *HKTemplate) string {
 	return jsonMarshalString(t)
 }
 
+// ListUnassignedSessions — ca chưa có người phụ trách và chưa ai động vào, trong
+// một khoảng ngày. Dùng để gợi ý lại người khi đồng bộ chạy lần sau.
+func (s *HKStore) ListUnassignedSessions(fromDay, toDay string) ([]HKSession, error) {
+	rows, err := s.db.Query(`SELECT `+sessionCols+`
+		FROM hk_session
+		WHERE staff_id = '' AND started_at = 0 AND day >= ? AND day <= ?
+		ORDER BY checkout_at`, fromDay, toDay)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HKSession{}
+	for rows.Next() {
+		sess, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sess)
+	}
+	return out, rows.Err()
+}
+
+// AssignSessionStaff chỉ đổi người phụ trách, không đụng các trường khác.
+func (s *HKStore) AssignSessionStaff(id, staffID string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`UPDATE hk_session SET staff_id = ? WHERE id = ?`, staffID, id)
+	return err
+}
+
 func (s *HKStore) UpdateSession(sess HKSession) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()

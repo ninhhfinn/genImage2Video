@@ -1529,3 +1529,13 @@ tbody tr:last-child td {
 .mob-sum--3 > div span {
 	font-size: 11.5px;
 }
+
+/* Ô chọn người phụ trách còn trống: viền cam + nền nhạt để nhìn lướt qua là thấy
+   đây là việc cần làm. Trước đây nó trông y hệt ô đã điền, nên quản lý đi tìm
+   một cái nút "thêm ca" không tồn tại thay vì bấm vào ô này. */
+.select--todo {
+	border-color: var(--warn);
+	background: var(--warn-bg);
+	color: var(--warn);
+	font-weight: 600;
+}

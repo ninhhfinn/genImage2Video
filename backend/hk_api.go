@@ -776,13 +776,13 @@ func (a *HKApp) handleSessionsSync(w http.ResponseWriter, r *http.Request) {
 	}
 	hkDecodeBody(r, &body)
 
-	created, skipped, err := a.hkSyncSessions(body.Ahead)
+	created, skipped, assigned, err := a.hkSyncSessions(body.Ahead)
 	if err != nil {
 		hkFail(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	hkWriteJSON(w, http.StatusOK, map[string]interface{}{
-		"created": created, "skipped": skipped, "synced_at": hkNowMs(),
+		"created": created, "skipped": skipped, "assigned": assigned, "synced_at": hkNowMs(),
 	})
 }
 

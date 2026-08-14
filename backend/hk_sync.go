@@ -273,16 +273,16 @@ func hkTemplateForRoomType(templates []HKTemplate, roomType string) string {
 // nay thì ca bị bỏ sót sẽ biến mất khỏi màn hình thay vì hiện ra để xử lý.
 //
 // Chạy lại bao nhiêu lần cũng không đẻ ca trùng: khoá là mã lượt đặt trong iCal.
-func (a *HKApp) hkSyncSessions(ahead int) (created int, skipped int, err error) {
+func (a *HKApp) hkSyncSessions(ahead int) (created int, skipped int, assigned int, err error) {
 	if ahead <= 0 {
 		ahead = 14
 	}
 	rooms, err := a.store.ListRooms(true)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	if len(rooms) == 0 {
-		return 0, 0, fmt.Errorf("chưa có phòng nào — bấm Đồng bộ phòng trước")
+		return 0, 0, 0, fmt.Errorf("chưa có phòng nào — bấm Đồng bộ phòng trước")
 	}
 
 	loc := time.Now().Location()
@@ -319,7 +319,58 @@ func (a *HKApp) hkSyncSessions(ahead int) (created int, skipped int, err error) 
 	if failed > 0 {
 		log.Printf("[hk] đồng bộ lịch: tạo %d ca, bỏ qua %d ca đã có, %d phòng lỗi feed", created, skipped, failed)
 	}
-	return created, skipped, nil
+
+	// Gợi ý lại người phụ trách cho ca CŨ còn trống.
+	//
+	// Gợi ý chỉ chạy lúc tạo ca là không đủ: ca sinh ra trước khi có cô nào nhận
+	// khu đó thì mãi mãi ở trạng thái "chưa xếp", và bấm Đồng bộ lịch lần nữa
+	// cũng không sửa được vì ca đã tồn tại. Quản lý ngồi nhìn một danh sách trống
+	// người mà không hiểu vì sao — đúng tình huống đã gặp khi test.
+	//
+	// Chỉ đụng ca chưa ai bắt đầu: ca đang dở mà bị đổi người là cướp việc giữa chừng.
+	assigned, aerr := a.hkSuggestStaffForOpenSessions(from, to)
+	if aerr != nil {
+		// Gán người là việc phụ; hỏng ở đây không được làm hỏng cả lượt đồng bộ.
+		log.Printf("[hk] gợi ý người phụ trách lỗi: %v", aerr)
+		assigned = 0
+	} else if assigned > 0 {
+		log.Printf("[hk] đã gợi ý người phụ trách cho %d ca còn trống", assigned)
+	}
+	return created, skipped, assigned, nil
+}
+
+// hkSuggestStaffForOpenSessions gán người theo khu vực cho các ca còn trống.
+// Trả về số ca đã gán được.
+func (a *HKApp) hkSuggestStaffForOpenSessions(fromDay, toDay string) (int, error) {
+	open, err := a.store.ListUnassignedSessions(fromDay, toDay)
+	if err != nil {
+		return 0, err
+	}
+	if len(open) == 0 {
+		return 0, nil
+	}
+	rooms, err := a.store.ListRooms(false)
+	if err != nil {
+		return 0, err
+	}
+	zoneOf := map[string]string{}
+	for _, r := range rooms {
+		zoneOf[r.ID] = r.Zone
+	}
+
+	n := 0
+	for _, sess := range open {
+		staffID := a.hkSuggestStaff(zoneOf[sess.RoomID])
+		if staffID == "" {
+			continue
+		}
+		if err := a.store.AssignSessionStaff(sess.ID, staffID); err != nil {
+			log.Printf("[hk] gán ca %s lỗi: %v", sess.ID, err)
+			continue
+		}
+		n++
+	}
+	return n, nil
 }
 
 // hkCreateSessionFromTurn tạo một ca dọn từ một lượt khách rời phòng.

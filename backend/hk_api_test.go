@@ -649,3 +649,81 @@ func TestPhotoStoredOnDisk(t *testing.T) {
 		t.Fatalf("ảnh phải đọc lại được từ đĩa: %d", w.Code)
 	}
 }
+
+// Gợi ý người phụ trách phải chạy lại cho ca CŨ còn trống.
+//
+// Tình huống thật gặp lúc test: ca sinh ra trước khi có cô nào nhận khu đó, nên
+// nằm mãi ở "chưa xếp"; bấm Đồng bộ lịch lần nữa cũng không sửa vì ca đã tồn tại.
+// Quản lý nhìn danh sách trống người mà không hiểu vì sao.
+func TestSyncSuggestsStaffForExistingUnassignedSessions(t *testing.T) {
+	e := newHKTestEnv(t)
+	day := today()
+
+	// Ca tạo khi chưa có ai nhận khu "Cầu Giấy" của phòng test.
+	sess := e.createSessionUID(day, "uid-chua-xep")
+	if err := e.app.store.AssignSessionStaff(sess.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Giờ mới có cô nhận đúng khu đó.
+	e.do("POST", "/api/hk/staffs/review", e.adminToken, map[string]string{
+		"id": e.lanID, "status": HKStaffActive,
+	})
+
+	n, err := e.app.hkSuggestStaffForOpenSessions(day, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("muốn gán được 1 ca, được %d", n)
+	}
+	after, _ := e.app.store.SessionByID(sess.ID)
+	if after.StaffID != e.lanID {
+		t.Fatalf("ca phải được gán cho cô nhận khu Cầu Giấy, được %q", after.StaffID)
+	}
+}
+
+// Ca đang dở KHÔNG được đổi người — cướp việc giữa chừng.
+func TestSyncDoesNotReassignStartedSession(t *testing.T) {
+	e := newHKTestEnv(t)
+	day := today()
+	sess := e.createSessionUID(day, "uid-dang-do")
+	e.app.store.AssignSessionStaff(sess.ID, "")
+
+	// Cô Hoa đã bấm bắt đầu (dù chưa được xếp chính thức).
+	s, _ := e.app.store.SessionByID(sess.ID)
+	s.StartedAt = hkNowMs()
+	if err := e.app.store.UpdateSession(s); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := e.app.hkSuggestStaffForOpenSessions(day, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("ca đã bắt đầu không được gán lại, gán %d ca", n)
+	}
+}
+
+// Không có ai nhận khu đó thì để trống cho quản lý xếp tay, không gán bừa.
+func TestSuggestLeavesBlankWhenNoZoneMatch(t *testing.T) {
+	e := newHKTestEnv(t)
+	day := today()
+	sess := e.createSessionUID(day, "uid-khong-khop")
+	e.app.store.AssignSessionStaff(sess.ID, "")
+
+	// Đổi khu của phòng sang nơi không cô nào nhận.
+	room, _ := e.app.store.RoomByID(e.roomID)
+	room.Zone = "Cà Mau"
+	e.app.store.UpsertRoom(room)
+
+	n, _ := e.app.hkSuggestStaffForOpenSessions(day, day)
+	if n != 0 {
+		t.Fatalf("không ai nhận khu đó thì phải để trống, gán %d", n)
+	}
+	after, _ := e.app.store.SessionByID(sess.ID)
+	if after.StaffID != "" {
+		t.Fatalf("không được gán bừa cho người khu khác: %q", after.StaffID)
+	}
+}
