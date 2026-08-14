@@ -118,26 +118,89 @@ func startWebServer(port int) error {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "2.0.0"})
 	})
 
+	// ── Module Dọn dẹp (admin.quanlyhomestay.com) ──
+	// Một binary phục vụ hai web: video.… là công cụ dựng video, admin.… là app
+	// checklist + chấm công cho cô dọn dẹp. Tách bằng tên miền chứ không phải
+	// đường dẫn, để cô dọn dẹp không bao giờ nhìn thấy công cụ video.
+	hkApp, err := NewHKApp(hkDataDir())
+	if err != nil {
+		// Không chặn cả server: công cụ video đang chạy sản xuất, không được sập
+		// chỉ vì module mới mở DB lỗi. Ghi log rõ rồi chạy tiếp thiếu module này.
+		fmt.Printf("⚠️  Không khởi động được module Dọn dẹp: %v\n", err)
+	} else {
+		hkApp.Register(mux)
+		fmt.Printf("🧹  Module Dọn dẹp: dữ liệu tại %s\n", hkDataDir())
+	}
+
 	// Serve React frontend từ dist/ (production)
-	distDir := "dist"
-	if _, err := os.Stat(distDir); err == nil {
-		fs := http.FileServer(http.Dir(distDir))
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			// SPA fallback: nếu file không tồn tại → serve index.html
-			path := filepath.Join(distDir, r.URL.Path)
-			if _, err := os.Stat(path); os.IsNotExist(err) {
-				http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
+	serveSPA := makeSPAHandler("dist")
+	serveAdminSPA := makeSPAHandler("dist-admin")
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// `/assets-admin/…` phải về app quản lý dù đứng ở tên miền nào: khi chạy
+		// local dưới /admin, trình duyệt xin tài nguyên bằng đường dẫn tuyệt đối
+		// nên nó không mang theo tiền tố /admin nữa.
+		if isAdminHost(r) || strings.HasPrefix(r.URL.Path, "/admin") ||
+			strings.HasPrefix(r.URL.Path, "/assets-admin/") {
+			if serveAdminSPA != nil {
+				serveAdminSPA(w, r)
 				return
 			}
-			fs.ServeHTTP(w, r)
-		})
-	}
+			http.Error(w, "Chưa build app quản lý dọn dẹp. Chạy: cd frontend-admin && npm run build", 503)
+			return
+		}
+		if serveSPA != nil {
+			serveSPA(w, r)
+		}
+	})
 
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("\n🚀  Backend API: http://localhost%s\n", addr)
 	fmt.Printf("    Frontend:    http://localhost:5173\n")
 	fmt.Println("    Nhấn Ctrl+C để dừng")
 	return http.ListenAndServe(addr, handler)
+}
+
+// isAdminHost nhận ra app quản lý dọn dẹp theo tên miền: admin.quanlyhomestay.com
+// hoặc bất kỳ host nào bắt đầu bằng "admin.". Chạy local không có subdomain nên
+// còn đường /admin/... để dev bấm thử — xem handler ở trên.
+func isAdminHost(r *http.Request) bool {
+	host := r.Host
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	return strings.HasPrefix(strings.ToLower(host), "admin.")
+}
+
+// makeSPAHandler phục vụ một thư mục build của Vite kèm SPA fallback. Trả nil khi
+// thư mục chưa tồn tại, để chỗ gọi báo lỗi cho người dùng biết cần build.
+//
+// Đường dẫn được làm sạch trước khi ghép: request "/../../etc/passwd" mà ghép
+// thẳng vào filepath.Join là đọc được file ngoài thư mục dist.
+func makeSPAHandler(distDir string) http.HandlerFunc {
+	if _, err := os.Stat(distDir); err != nil {
+		return nil
+	}
+	fs := http.FileServer(http.Dir(distDir))
+	indexPath := filepath.Join(distDir, "index.html")
+	return func(w http.ResponseWriter, r *http.Request) {
+		clean := filepath.Clean("/" + strings.TrimPrefix(r.URL.Path, "/admin"))
+		if clean == "/" {
+			http.ServeFile(w, r, indexPath)
+			return
+		}
+		if _, err := os.Stat(filepath.Join(distDir, clean)); os.IsNotExist(err) {
+			// Đường dẫn nội bộ của SPA (VD /cleaning/session/abc) → trả index.html
+			// để React tự định tuyến.
+			http.ServeFile(w, r, indexPath)
+			return
+		}
+		r2 := *r
+		u := *r.URL
+		u.Path = clean
+		r2.URL = &u
+		fs.ServeHTTP(w, &r2)
+	}
 }
 
 // ─── CORS Middleware ──────────────────────────────────────────────────────
@@ -150,6 +213,9 @@ func corsMiddleware(next http.Handler) http.Handler {
 			"http://localhost:5173",
 			"http://localhost:3000",
 			"http://localhost:8080",
+			// App quản lý dọn dẹp chạy dev ở cổng riêng để build app này không phải
+			// dừng công cụ video đang chạy.
+			"http://localhost:5174",
 		}
 		// Nếu có ALLOWED_ORIGINS trong env (production)
 		if env := os.Getenv("ALLOWED_ORIGINS"); env != "" {
@@ -162,7 +228,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 			}
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-HK-Token")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 		if r.Method == "OPTIONS" {

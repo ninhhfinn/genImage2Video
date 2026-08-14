@@ -35,3 +35,9 @@ scratch/
 # ── Rác hệ điều hành ──
 .DS_Store
 Thumbs.db
+
+# ── Dữ liệu module Dọn dẹp ──
+# housekeeping.db chứa tài khoản, chấm công, và photos/ chứa ảnh trong nhà khách.
+# Không bao giờ được commit. Sao lưu bằng cách copy cả thư mục.
+hk_data/
+backend/hk_data/

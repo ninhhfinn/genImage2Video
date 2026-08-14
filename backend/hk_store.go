@@ -1,0 +1,635 @@
+package main
+
+// Tầng lưu trữ module Dọn dẹp — SQLite (một file .db, không cần server DB).
+//
+// Toàn bộ truy cập DB đi qua *HKStore. Nếu sau này chuyển sang Postgres hoặc
+// Firebase thì chỉ phải viết lại file này; handler và luật nghiệp vụ không đụng
+// tới SQL.
+//
+// Driver là modernc.org/sqlite — bản thuần Go, KHÔNG cần cgo, nên `go build`
+// vẫn chạy trên máy không có trình biên dịch C và cross-compile được như cũ.
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+type HKStore struct {
+	db *sql.DB
+	// SQLite cho phép nhiều reader nhưng một writer. Ghi đồng thời từ 5-6 cô cùng
+	// lúc thì driver trả "database is locked" thay vì chờ, nên serialise ghi ở
+	// đây cho chắc — quy mô này không cần hơn.
+	writeMu sync.Mutex
+}
+
+func hkDataDir() string {
+	if d := strings.TrimSpace(os.Getenv("HK_DATA_DIR")); d != "" {
+		return d
+	}
+	return "hk_data"
+}
+
+func OpenHKStore(path string) (*HKStore, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil && filepath.Dir(path) != "." {
+		return nil, err
+	}
+	// busy_timeout: chờ 5 giây thay vì lỗi ngay khi có người khác đang ghi.
+	// foreign_keys: bật để phụ cấp không mồ côi khi ca bị xoá.
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Ping(); err != nil {
+		return nil, err
+	}
+	s := &HKStore{db: db}
+	if err := s.migrate(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *HKStore) Close() error { return s.db.Close() }
+
+func (s *HKStore) migrate() error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS hk_user (
+			id TEXT PRIMARY KEY,
+			role TEXT NOT NULL,
+			name TEXT NOT NULL,
+			phone TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			status TEXT NOT NULL,
+			zones TEXT NOT NULL DEFAULT '[]',
+			note TEXT NOT NULL DEFAULT '',
+			bank TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			reviewed_at INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS hk_token (
+			token TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			expires_at INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS hk_token_user ON hk_token(user_id)`,
+		`CREATE TABLE IF NOT EXISTS hk_room (
+			id TEXT PRIMARY KEY,
+			listing_id TEXT NOT NULL DEFAULT '',
+			code TEXT NOT NULL DEFAULT '',
+			name TEXT NOT NULL DEFAULT '',
+			address TEXT NOT NULL DEFAULT '',
+			zone TEXT NOT NULL DEFAULT '',
+			room_type TEXT NOT NULL DEFAULT '',
+			host_id TEXT NOT NULL DEFAULT '',
+			host_name TEXT NOT NULL DEFAULT '',
+			template_id TEXT NOT NULL DEFAULT '',
+			door_note TEXT NOT NULL DEFAULT '',
+			base_fee INTEGER NOT NULL DEFAULT 0,
+			checkin_hour INTEGER NOT NULL DEFAULT 14,
+			checkout_hour INTEGER NOT NULL DEFAULT 11,
+			active INTEGER NOT NULL DEFAULT 1,
+			synced_at INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS hk_template (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			room_types TEXT NOT NULL DEFAULT '[]',
+			groups TEXT NOT NULL DEFAULT '[]',
+			updated_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS hk_session (
+			id TEXT PRIMARY KEY,
+			day TEXT NOT NULL,
+			room_id TEXT NOT NULL,
+			listing_id TEXT NOT NULL DEFAULT '',
+			template_id TEXT NOT NULL DEFAULT '',
+			staff_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			checkout_at INTEGER NOT NULL DEFAULT 0,
+			next_checkin_at INTEGER NOT NULL DEFAULT 0,
+			deadline_at INTEGER NOT NULL DEFAULT 0,
+			guest_note TEXT NOT NULL DEFAULT '',
+			base_fee INTEGER NOT NULL DEFAULT 0,
+			deduction INTEGER NOT NULL DEFAULT 0,
+			items_state TEXT NOT NULL DEFAULT '{}',
+			template_snapshot TEXT NOT NULL DEFAULT '',
+			started_at INTEGER NOT NULL DEFAULT 0,
+			submitted_at INTEGER NOT NULL DEFAULT 0,
+			reviewed_at INTEGER NOT NULL DEFAULT 0,
+			reviewed_by TEXT NOT NULL DEFAULT '',
+			review_note TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS hk_session_day ON hk_session(day)`,
+		`CREATE INDEX IF NOT EXISTS hk_session_staff ON hk_session(staff_id)`,
+		`CREATE INDEX IF NOT EXISTS hk_session_checkout ON hk_session(checkout_at)`,
+		// Một phòng chỉ có một ca mỗi ngày — chặn ở tầng DB để job đồng bộ chạy hai
+		// lần không đẻ ra hai ca, kéo theo trả tiền hai lần.
+		`CREATE UNIQUE INDEX IF NOT EXISTS hk_session_room_day ON hk_session(room_id, day)`,
+		`CREATE TABLE IF NOT EXISTS hk_allowance (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL REFERENCES hk_session(id) ON DELETE CASCADE,
+			type TEXT NOT NULL,
+			amount INTEGER NOT NULL DEFAULT 0,
+			note TEXT NOT NULL DEFAULT '',
+			photos TEXT NOT NULL DEFAULT '[]',
+			status TEXT NOT NULL,
+			created_at INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS hk_allowance_session ON hk_allowance(session_id)`,
+	}
+	for _, q := range stmts {
+		if _, err := s.db.Exec(q); err != nil {
+			return fmt.Errorf("migrate: %w (%s)", err, firstLineOf(q))
+		}
+	}
+	return nil
+}
+
+func firstLineOf(q string) string {
+	if i := strings.IndexByte(q, '\n'); i > 0 {
+		return q[:i]
+	}
+	return q
+}
+
+func jsonMarshalString(v interface{}) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// ─── Người dùng ───────────────────────────────────────────────────────────
+
+func (s *HKStore) UpsertUser(u HKUser) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`
+		INSERT INTO hk_user (id, role, name, phone, password_hash, status, zones, note, bank, created_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET
+			role=excluded.role, name=excluded.name, phone=excluded.phone,
+			password_hash=excluded.password_hash, status=excluded.status,
+			zones=excluded.zones, note=excluded.note, bank=excluded.bank`,
+		u.ID, u.Role, u.Name, hkNormalizePhone(u.Phone), u.PasswordHash, u.Status,
+		jsonMarshalString(u.Zones), u.Note, u.Bank, u.CreatedAt)
+	return err
+}
+
+func scanUser(row interface{ Scan(...interface{}) error }) (HKUser, error) {
+	var u HKUser
+	var zones string
+	err := row.Scan(&u.ID, &u.Role, &u.Name, &u.Phone, &u.PasswordHash, &u.Status,
+		&zones, &u.Note, &u.Bank, &u.CreatedAt)
+	if err != nil {
+		return u, err
+	}
+	json.Unmarshal([]byte(zones), &u.Zones)
+	if u.Zones == nil {
+		u.Zones = []string{}
+	}
+	return u, nil
+}
+
+const userCols = `id, role, name, phone, password_hash, status, zones, note, bank, created_at`
+
+func (s *HKStore) UserByPhone(phone string) (HKUser, error) {
+	row := s.db.QueryRow(`SELECT `+userCols+` FROM hk_user WHERE phone = ?`, hkNormalizePhone(phone))
+	return scanUser(row)
+}
+
+func (s *HKStore) UserByID(id string) (HKUser, error) {
+	row := s.db.QueryRow(`SELECT `+userCols+` FROM hk_user WHERE id = ?`, id)
+	return scanUser(row)
+}
+
+func (s *HKStore) ListUsers(role string) ([]HKUser, error) {
+	q := `SELECT ` + userCols + ` FROM hk_user`
+	var args []interface{}
+	if role != "" {
+		q += ` WHERE role = ?`
+		args = append(args, role)
+	}
+	q += ` ORDER BY name COLLATE NOCASE`
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HKUser{}
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (s *HKStore) SetUserStatus(id, status string, now int64) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`UPDATE hk_user SET status=?, reviewed_at=? WHERE id=?`, status, now, id)
+	return err
+}
+
+// ─── Token phiên ──────────────────────────────────────────────────────────
+
+func (s *HKStore) SaveToken(token, userID string, now, expires int64) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`INSERT INTO hk_token (token, user_id, created_at, expires_at) VALUES (?,?,?,?)`,
+		token, userID, now, expires)
+	return err
+}
+
+func (s *HKStore) UserByToken(token string, now int64) (HKUser, error) {
+	row := s.db.QueryRow(`
+		SELECT u.`+strings.ReplaceAll(userCols, ", ", ", u.")+`
+		FROM hk_token t JOIN hk_user u ON u.id = t.user_id
+		WHERE t.token = ? AND t.expires_at > ?`, token, now)
+	return scanUser(row)
+}
+
+func (s *HKStore) DeleteToken(token string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM hk_token WHERE token = ?`, token)
+	return err
+}
+
+// PurgeExpiredTokens dọn token hết hạn. Không có nó thì bảng phình vô hạn vì mỗi
+// lần đăng nhập là một dòng mới.
+func (s *HKStore) PurgeExpiredTokens(now int64) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM hk_token WHERE expires_at <= ?`, now)
+	return err
+}
+
+// ─── Phòng ────────────────────────────────────────────────────────────────
+
+const roomCols = `id, listing_id, code, name, address, zone, room_type, host_id, host_name,
+	template_id, door_note, base_fee, checkin_hour, checkout_hour, active, synced_at`
+
+func scanRoom(row interface{ Scan(...interface{}) error }) (HKRoom, error) {
+	var r HKRoom
+	var active int
+	err := row.Scan(&r.ID, &r.ListingID, &r.Code, &r.Name, &r.Address, &r.Zone, &r.RoomType,
+		&r.HostID, &r.HostName, &r.TemplateID, &r.DoorNote, &r.BaseFee,
+		&r.CheckinHr, &r.CheckoutHr, &active, &r.SyncedAt)
+	r.Active = active != 0
+	return r, err
+}
+
+// UpsertRoom giữ nguyên các trường do người dùng chỉnh tay (đơn giá, mẫu
+// checklist, hướng dẫn vào nhà) khi đồng bộ lại từ Dayladau — nếu không, mỗi lần
+// bấm Đồng bộ là quản lý mất hết công sửa.
+func (s *HKStore) UpsertRoom(r HKRoom) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	active := 0
+	if r.Active {
+		active = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO hk_room (`+roomCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET
+			listing_id=excluded.listing_id, code=excluded.code, name=excluded.name,
+			address=excluded.address, zone=excluded.zone, room_type=excluded.room_type,
+			host_id=excluded.host_id, host_name=excluded.host_name,
+			checkin_hour=excluded.checkin_hour, checkout_hour=excluded.checkout_hour,
+			active=excluded.active, synced_at=excluded.synced_at`,
+		r.ID, r.ListingID, r.Code, r.Name, r.Address, r.Zone, r.RoomType, r.HostID, r.HostName,
+		r.TemplateID, r.DoorNote, r.BaseFee, r.CheckinHr, r.CheckoutHr, active, r.SyncedAt)
+	return err
+}
+
+func (s *HKStore) UpdateRoomSettings(id, templateID, doorNote string, baseFee int64) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`UPDATE hk_room SET template_id=?, door_note=?, base_fee=? WHERE id=?`,
+		templateID, doorNote, baseFee, id)
+	return err
+}
+
+func (s *HKStore) ListRooms(onlyActive bool) ([]HKRoom, error) {
+	q := `SELECT ` + roomCols + ` FROM hk_room`
+	if onlyActive {
+		q += ` WHERE active = 1`
+	}
+	q += ` ORDER BY zone, name`
+	rows, err := s.db.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HKRoom{}
+	for rows.Next() {
+		r, err := scanRoom(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *HKStore) RoomByID(id string) (HKRoom, error) {
+	return scanRoom(s.db.QueryRow(`SELECT `+roomCols+` FROM hk_room WHERE id = ?`, id))
+}
+
+// ─── Mẫu checklist ────────────────────────────────────────────────────────
+
+func (s *HKStore) UpsertTemplate(t HKTemplate) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`
+		INSERT INTO hk_template (id, name, room_types, groups, updated_at) VALUES (?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET
+			name=excluded.name, room_types=excluded.room_types,
+			groups=excluded.groups, updated_at=excluded.updated_at`,
+		t.ID, t.Name, jsonMarshalString(t.RoomTypes), jsonMarshalString(t.Groups), t.UpdatedAt)
+	return err
+}
+
+func scanTemplate(row interface{ Scan(...interface{}) error }) (HKTemplate, error) {
+	var t HKTemplate
+	var roomTypes, groups string
+	if err := row.Scan(&t.ID, &t.Name, &roomTypes, &groups, &t.UpdatedAt); err != nil {
+		return t, err
+	}
+	json.Unmarshal([]byte(roomTypes), &t.RoomTypes)
+	json.Unmarshal([]byte(groups), &t.Groups)
+	if t.RoomTypes == nil {
+		t.RoomTypes = []string{}
+	}
+	if t.Groups == nil {
+		t.Groups = []HKGroup{}
+	}
+	return t, nil
+}
+
+func (s *HKStore) ListTemplates() ([]HKTemplate, error) {
+	rows, err := s.db.Query(`SELECT id, name, room_types, groups, updated_at FROM hk_template ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HKTemplate{}
+	for rows.Next() {
+		t, err := scanTemplate(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (s *HKStore) TemplateByID(id string) (HKTemplate, error) {
+	return scanTemplate(s.db.QueryRow(
+		`SELECT id, name, room_types, groups, updated_at FROM hk_template WHERE id = ?`, id))
+}
+
+// ─── Ca dọn ───────────────────────────────────────────────────────────────
+
+const sessionCols = `id, day, room_id, listing_id, template_id, staff_id, status,
+	checkout_at, next_checkin_at, deadline_at, guest_note, base_fee, deduction,
+	items_state, template_snapshot, started_at, submitted_at, reviewed_at, reviewed_by, review_note`
+
+func scanSession(row interface{ Scan(...interface{}) error }) (HKSession, error) {
+	var s HKSession
+	var itemsState, snapshot string
+	err := row.Scan(&s.ID, &s.Day, &s.RoomID, &s.ListingID, &s.TemplateID, &s.StaffID, &s.Status,
+		&s.CheckoutAt, &s.NextCheckinAt, &s.DeadlineAt, &s.GuestNote, &s.BaseFee, &s.Deduction,
+		&itemsState, &snapshot, &s.StartedAt, &s.SubmittedAt, &s.ReviewedAt, &s.ReviewedBy, &s.ReviewNote)
+	if err != nil {
+		return s, err
+	}
+	json.Unmarshal([]byte(itemsState), &s.ItemsState)
+	if s.ItemsState == nil {
+		s.ItemsState = map[string]HKItemState{}
+	}
+	if strings.TrimSpace(snapshot) != "" {
+		var t HKTemplate
+		if json.Unmarshal([]byte(snapshot), &t) == nil {
+			s.TemplateSnapshot = &t
+		}
+	}
+	s.Allowances = []HKAllowance{}
+	return s, nil
+}
+
+// InsertSessionIfAbsent trả về false khi phòng đó đã có ca trong ngày. Dùng
+// INSERT OR IGNORE dựa trên unique index (room_id, day) thay vì SELECT-rồi-INSERT
+// để hai lần đồng bộ chạy song song không cùng lọt qua khe kiểm tra.
+func (s *HKStore) InsertSessionIfAbsent(sess HKSession) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	res, err := s.db.Exec(`
+		INSERT OR IGNORE INTO hk_session (`+sessionCols+`)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sess.ID, sess.Day, sess.RoomID, sess.ListingID, sess.TemplateID, sess.StaffID, sess.Status,
+		sess.CheckoutAt, sess.NextCheckinAt, sess.DeadlineAt, sess.GuestNote, sess.BaseFee, sess.Deduction,
+		jsonMarshalString(sess.ItemsState), snapshotJSON(sess.TemplateSnapshot),
+		sess.StartedAt, sess.SubmittedAt, sess.ReviewedAt, sess.ReviewedBy, sess.ReviewNote)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+func snapshotJSON(t *HKTemplate) string {
+	if t == nil {
+		return ""
+	}
+	return jsonMarshalString(t)
+}
+
+func (s *HKStore) UpdateSession(sess HKSession) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`
+		UPDATE hk_session SET staff_id=?, status=?, guest_note=?, base_fee=?, deduction=?,
+			items_state=?, started_at=?, submitted_at=?, reviewed_at=?, reviewed_by=?, review_note=?
+		WHERE id=?`,
+		sess.StaffID, sess.Status, sess.GuestNote, sess.BaseFee, sess.Deduction,
+		jsonMarshalString(sess.ItemsState), sess.StartedAt, sess.SubmittedAt,
+		sess.ReviewedAt, sess.ReviewedBy, sess.ReviewNote, sess.ID)
+	return err
+}
+
+type HKSessionFilter struct {
+	Day     string
+	From    int64
+	To      int64
+	StaffID string
+	Status  string
+}
+
+func (s *HKStore) ListSessions(f HKSessionFilter) ([]HKSession, error) {
+	q := `SELECT ` + sessionCols + ` FROM hk_session WHERE 1=1`
+	var args []interface{}
+	if f.Day != "" {
+		q += ` AND day = ?`
+		args = append(args, f.Day)
+	}
+	if f.From > 0 {
+		q += ` AND checkout_at >= ?`
+		args = append(args, f.From)
+	}
+	if f.To > 0 {
+		q += ` AND checkout_at <= ?`
+		args = append(args, f.To)
+	}
+	if f.StaffID != "" {
+		q += ` AND staff_id = ?`
+		args = append(args, f.StaffID)
+	}
+	if f.Status != "" {
+		q += ` AND status = ?`
+		args = append(args, f.Status)
+	}
+	q += ` ORDER BY checkout_at`
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HKSession{}
+	ids := []string{}
+	for rows.Next() {
+		sess, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sess)
+		ids = append(ids, sess.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Nạp phụ cấp trong MỘT truy vấn thay vì mỗi ca một lần — bảng công tháng có
+	// vài trăm ca, N+1 ở đây là chờ vài giây trắng màn.
+	byID, err := s.allowancesFor(ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if list, ok := byID[out[i].ID]; ok {
+			out[i].Allowances = list
+		}
+	}
+	return out, nil
+}
+
+func (s *HKStore) SessionByID(id string) (HKSession, error) {
+	sess, err := scanSession(s.db.QueryRow(`SELECT `+sessionCols+` FROM hk_session WHERE id = ?`, id))
+	if err != nil {
+		return sess, err
+	}
+	byID, err := s.allowancesFor([]string{id})
+	if err != nil {
+		return sess, err
+	}
+	if list, ok := byID[id]; ok {
+		sess.Allowances = list
+	}
+	return sess, nil
+}
+
+func (s *HKStore) allowancesFor(sessionIDs []string) (map[string][]HKAllowance, error) {
+	out := map[string][]HKAllowance{}
+	if len(sessionIDs) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(sessionIDs)), ",")
+	args := make([]interface{}, len(sessionIDs))
+	for i, id := range sessionIDs {
+		args[i] = id
+	}
+	rows, err := s.db.Query(`
+		SELECT id, session_id, type, amount, note, photos, status, created_at
+		FROM hk_allowance WHERE session_id IN (`+placeholders+`) ORDER BY created_at`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a HKAllowance
+		var photos string
+		if err := rows.Scan(&a.ID, &a.SessionID, &a.Type, &a.Amount, &a.Note, &photos, &a.Status, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		json.Unmarshal([]byte(photos), &a.Photos)
+		if a.Photos == nil {
+			a.Photos = []HKPhoto{}
+		}
+		out[a.SessionID] = append(out[a.SessionID], a)
+	}
+	return out, rows.Err()
+}
+
+func (s *HKStore) InsertAllowance(a HKAllowance) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`
+		INSERT INTO hk_allowance (id, session_id, type, amount, note, photos, status, created_at)
+		VALUES (?,?,?,?,?,?,?,?)`,
+		a.ID, a.SessionID, a.Type, a.Amount, a.Note, jsonMarshalString(a.Photos), a.Status, a.CreatedAt)
+	return err
+}
+
+func (s *HKStore) ReviewAllowance(id, status string, amount int64, setAmount bool) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if setAmount {
+		_, err := s.db.Exec(`UPDATE hk_allowance SET status=?, amount=? WHERE id=?`, status, amount, id)
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE hk_allowance SET status=? WHERE id=?`, status, id)
+	return err
+}
+
+func (s *HKStore) AllowanceByID(id string) (HKAllowance, error) {
+	var a HKAllowance
+	var photos string
+	err := s.db.QueryRow(`
+		SELECT id, session_id, type, amount, note, photos, status, created_at
+		FROM hk_allowance WHERE id = ?`, id).
+		Scan(&a.ID, &a.SessionID, &a.Type, &a.Amount, &a.Note, &photos, &a.Status, &a.CreatedAt)
+	if err != nil {
+		return a, err
+	}
+	json.Unmarshal([]byte(photos), &a.Photos)
+	return a, nil
+}
+
+func (s *HKStore) CountRows(table string) (int, error) {
+	// Chỉ nhận tên bảng nội bộ — không nhận đầu vào từ người dùng.
+	switch table {
+	case "hk_user", "hk_room", "hk_template", "hk_session", "hk_allowance":
+	default:
+		return 0, fmt.Errorf("bảng không hợp lệ: %s", table)
+	}
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n)
+	return n, err
+}
+
+func hkNowMs() int64 { return time.Now().UnixMilli() }
