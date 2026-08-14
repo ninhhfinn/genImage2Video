@@ -269,9 +269,10 @@ func TestGenThumbMockups(t *testing.T) {
 			Template: "amber", Width: W, Height: H,
 			Title:     "Amoureux NK605",
 			Address:   "30 ngõ 169 Doãn Kế Thiện",
-			Prices:    []string{"Giá giờ: 369K/2H", "Giá đêm/ngày: 559K", "Giá ngày/đêm: 659K"},
-			Brand:     "lag",
-			PageBadge: "1/4",
+			Prices: []string{"Giá giờ: 369K/2H", "Giá đêm/ngày: 559K", "Giá ngày/đêm: 659K"},
+			// Brand/PageBadge là trường riêng của bản Lagom, đã gỡ ở 603fdb1
+			// ("bỏ bản Lagom") nhưng test chưa dọn theo — cả gói test không biên
+			// dịch được kể từ đó. Bỏ hai dòng này để khôi phục.
 			Watermark: "",
 		}, pick(2)},
 		{"thumb-3-strip.jpg", ThumbnailConfig{
