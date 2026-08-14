@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { uploadImages, parseListings, selectListing, fetchDayladau } from '../api/client'
+import GeoSelect from './GeoSelect'
 
 // Local-date helpers for the Dayladau date pickers (avoid UTC shift from toISOString).
 const pad = n => String(n).padStart(2, '0')
@@ -15,6 +16,7 @@ export default function SourcePanel({ onReady, onMultiSelect, toast, photoLimit 
   const [checkin, setCheckin]   = useState(TODAY)
   const [checkout, setCheckout] = useState(TOMORROW)
   const [guests, setGuests]     = useState(2)
+  const [geo, setGeo]           = useState(null) // { province_code, ward_code, keyword, label } | null
   const [listings, setListings] = useState([])
   const [checked, setChecked]   = useState(new Set())
   const [singleId, setSingleId] = useState(null)
@@ -48,6 +50,12 @@ export default function SourcePanel({ onReady, onMultiSelect, toast, photoLimit 
     try {
       const { data } = await fetchDayladau({
         checkin, checkout, guests: Number(guests) || 2, limit: 20, offset: 1,
+        // Dayladau dùng scheme mã tỉnh/phường CŨ (vd Hà Nội = "11", ward "14859",
+        // vẫn còn cấp district) — KHÁC hẳn mã vn-geo mới ("01"/"00013"). Gửi mã
+        // vn-geo vào → API lọc ra 0 listing. Nên chỉ gửi TÊN đã chọn làm keyword
+        // (lọc theo tên hoạt động tốt). Backend vẫn nhận được province_code/ward_code
+        // nếu sau này có nguồn mã đúng của Dayladau.
+        address: geo?.keyword || '',
       })
       if (data.error) {
         const errInfo = { title: data.error, details: data.details || 'Backend không trả details.', source: 'Dayladau API' }
@@ -195,24 +203,28 @@ export default function SourcePanel({ onReady, onMultiSelect, toast, photoLimit 
   return (
     <div>
       <div className="tabs">
-        <button className={`tab${tab==='dayladau'?' on':''}`} onClick={()=>setTab('dayladau')}>🏠 Dayladau</button>
-        <button className={`tab${tab==='upload'?' on':''}`} onClick={()=>setTab('upload')}>⬆ Tải lên</button>
-        <button className={`tab${tab==='api'?' on':''}`} onClick={()=>setTab('api')}>🔗 URL API</button>
+        <button className={`tab${tab==='dayladau'?' on':''}`} onClick={()=>setTab('dayladau')}>Dayladau</button>
+        <button className={`tab${tab==='upload'?' on':''}`} onClick={()=>setTab('upload')}>Tải lên</button>
+        <button className={`tab${tab==='api'?' on':''}`} onClick={()=>setTab('api')}>URL API</button>
       </div>
 
       {/* ── Dayladau (mặc định) ── */}
       {tab==='dayladau' && (
         <div>
-          <div style={{display:'flex',gap:10,alignItems:'flex-end'}}>
-            <label style={{flex:1,display:'flex',flexDirection:'column',gap:4,fontSize:12,fontWeight:600}}>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,fontWeight:600,marginBottom:8}}>
+            Địa chỉ / khu vực
+            <GeoSelect value={geo} onChange={setGeo} />
+          </label>
+          <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr) 64px',gap:8,alignItems:'end'}}>
+            <label style={{minWidth:0,display:'flex',flexDirection:'column',gap:4,fontSize:12,fontWeight:600}}>
               Nhận phòng <span style={{color:'var(--muted,#999)',fontWeight:400}}>14:00</span>
-              <input type="date" className="inp" value={checkin} onChange={e=>setCheckin(e.target.value)}/>
+              <input type="date" className="inp" style={{minWidth:0}} value={checkin} onChange={e=>setCheckin(e.target.value)}/>
             </label>
-            <label style={{flex:1,display:'flex',flexDirection:'column',gap:4,fontSize:12,fontWeight:600}}>
+            <label style={{minWidth:0,display:'flex',flexDirection:'column',gap:4,fontSize:12,fontWeight:600}}>
               Trả phòng <span style={{color:'var(--muted,#999)',fontWeight:400}}>11:00</span>
-              <input type="date" className="inp" value={checkout} onChange={e=>setCheckout(e.target.value)}/>
+              <input type="date" className="inp" style={{minWidth:0}} value={checkout} onChange={e=>setCheckout(e.target.value)}/>
             </label>
-            <label style={{width:78,display:'flex',flexDirection:'column',gap:4,fontSize:12,fontWeight:600}}>
+            <label style={{minWidth:0,display:'flex',flexDirection:'column',gap:4,fontSize:12,fontWeight:600}}>
               Khách
               <select className="inp" value={guests} onChange={e=>setGuests(e.target.value)}>
                 {[1,2,3,4,5,6,8,10].map(n=><option key={n} value={n}>{n}</option>)}
@@ -225,7 +237,7 @@ export default function SourcePanel({ onReady, onMultiSelect, toast, photoLimit 
             onClick={loadDayladau}
             disabled={loadingL}
           >
-            {loadingL ? <><span className="spin">⟳</span> Đang tải…</> : '🏠 Tải listing từ Dayladau'}
+            {loadingL ? <><span className="spin">⟳</span> Đang tải…</> : 'Tải listing từ Dayladau'}
           </button>
         </div>
       )}
@@ -309,7 +321,7 @@ export default function SourcePanel({ onReady, onMultiSelect, toast, photoLimit 
                 {loadingS ? <><span className="spin">⟳</span> Đang tải...</>
                   : checked.size === 0 ? 'Chọn listing'
                   : checked.size === 1 ? '✓ Xác nhận'
-                  : `🚀 Render ${checked.size} listing`}
+                  : `Render ${checked.size} listing`}
               </button>
             </div>
           </div>

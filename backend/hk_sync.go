@@ -99,7 +99,9 @@ func (a *HKApp) hkSyncRooms(limit int) (added, updated int, err error) {
 	// Lấy khoảng gần để danh sách bám sát những căn đang thật sự bán.
 	checkin := now.AddDate(0, 0, 1).Format("2006-01-02")
 	checkout := now.AddDate(0, 0, 2).Format("2006-01-02")
-	apiURL := buildDayladauURL(checkin, checkout, 2, limit, 1)
+	// Ba tham số địa điểm để rỗng: module dọn dẹp cần TẤT CẢ phòng đang bán, không
+	// lọc theo tỉnh/phường như màn dựng video.
+	apiURL := buildDayladauURL(checkin, checkout, 2, limit, 1, "", "", "")
 
 	raw, err := fetchRawJSON(apiURL, nil)
 	if err != nil {

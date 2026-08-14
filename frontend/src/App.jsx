@@ -466,7 +466,7 @@ export default function App() {
     <div className="app">
       <div className="topbar">
         <div className="logo">
-          <div className="logo-box">🎬</div>
+          <img className="logo-box" src="/dayladau-logo.png" alt="Dayladau" />
           <div className="logo-text">img<em>2</em>video</div>
         </div>
         <div className="topbar-pills">
@@ -484,37 +484,51 @@ export default function App() {
 
       <div className="workspace">
         <div className="panel">
-          <div className="phead"><span className="plabel">1 — Nguồn ảnh</span></div>
+          <div className="phead">
+            <span className="pnum">1</span>
+            <span className="ptitle">Nguồn ảnh</span>
+            <span className="phint">Dayladau · tải lên · URL API</span>
+          </div>
           <div className="pbody">
             <SourcePanel onReady={handleReady} onMultiSelect={handleMultiSelect} toast={toast} photoLimit={settings.photoLimit}/>
           </div>
         </div>
 
         <div className="panel">
-          <div className="phead"><span className="plabel">2 — Cài đặt</span></div>
+          <div className="phead">
+            <span className="pnum">2</span>
+            <span className="ptitle">Cài đặt</span>
+            <span className="phint">template · hiệu ứng · overlay</span>
+          </div>
           <div className="pbody">
             <SettingsPanel settings={settings} onChange={setSettings} uploadedCount={uploadedCount} apiAmenities={activeListing?.amenities || []}/>
           </div>
         </div>
 
         <div className="panel">
-          <div className="phead"><span className="plabel">3 — Xuất video</span></div>
-          <RenderPanel
-            canRender={uploadedCount>0 || pendingCount>0}
-            onRender={handleRender}
-            rendering={rendering}
-            done={done && !isQueueMode}
-            pct={pct} progText={progText} status={status} error={error}
-            queue={queue} isQueueMode={isQueueMode}
-            batchMode={settings.batchMode||'both'}
-            canThumbnail={uploadedCount>0}
-            onThumbnail={generateThumbnail}
-            thumbBusy={thumbBusy}
-            thumbUrl={thumbUrl}
-            thumbErr={thumbErr}
-          />
-          <HistoryPanel refresh={histRefresh}/>
-          <ThumbnailHistoryPanel refresh={thumbRefresh}/>
+          <div className="phead">
+            <span className="pnum">3</span>
+            <span className="ptitle">Xuất video</span>
+            <span className="phint">video + thumbnail + lịch sử</span>
+          </div>
+          <div className="pbody pbody-flush">
+            <RenderPanel
+              canRender={uploadedCount>0 || pendingCount>0}
+              onRender={handleRender}
+              rendering={rendering}
+              done={done && !isQueueMode}
+              pct={pct} progText={progText} status={status} error={error}
+              queue={queue} isQueueMode={isQueueMode}
+              batchMode={settings.batchMode||'both'}
+              canThumbnail={uploadedCount>0}
+              onThumbnail={generateThumbnail}
+              thumbBusy={thumbBusy}
+              thumbUrl={thumbUrl}
+              thumbErr={thumbErr}
+            />
+            <HistoryPanel refresh={histRefresh}/>
+            <ThumbnailHistoryPanel refresh={thumbRefresh}/>
+          </div>
         </div>
       </div>
 
