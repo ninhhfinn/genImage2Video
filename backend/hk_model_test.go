@@ -26,7 +26,7 @@ func hkPhotos(n int) []HKPhoto {
 }
 
 func hkSessionWith(state map[string]HKItemState) *HKSession {
-	return &HKSession{ItemsState: state, BaseFee: 100000}
+	return &HKSession{ItemsState: state}
 }
 
 // ─── Tiến độ checklist ────────────────────────────────────────────────────
@@ -143,138 +143,6 @@ func TestTemplateSnapshotWins(t *testing.T) {
 	}
 }
 
-// ─── Tính công ────────────────────────────────────────────────────────────
-
-func TestPayApprovedAndSubmitted(t *testing.T) {
-	approved := &HKSession{Status: HKSessionApproved, BaseFee: 100000}
-	if p := hkComputePay(approved); p.Total != 100000 || !p.Confirmed {
-		t.Fatalf("ca đã duyệt: %+v", p)
-	}
-	// Ca chờ đối soát VẪN ra tiền — cô làm xong là thấy tiền ngay.
-	submitted := &HKSession{Status: HKSessionSubmitted, BaseFee: 100000}
-	p := hkComputePay(submitted)
-	if p.Total != 100000 || p.Confirmed || !p.Payable {
-		t.Fatalf("ca chờ đối soát phải ra tiền nhưng chưa chốt: %+v", p)
-	}
-}
-
-func TestPayNotPayableStates(t *testing.T) {
-	for _, st := range []string{HKSessionTodo, HKSessionInProgress, HKSessionRejected} {
-		if p := hkComputePay(&HKSession{Status: st, BaseFee: 100000}); p.Total != 0 {
-			t.Errorf("trạng thái %s không được ra tiền, được %d", st, p.Total)
-		}
-	}
-}
-
-// Phụ cấp chờ duyệt không cộng vào tổng, kể cả cột tạm tính: hiện như tiền đã có
-// rồi sau đó quản lý cắt đi mới là thứ gây cãi nhau.
-func TestPayPendingAllowanceExcluded(t *testing.T) {
-	s := &HKSession{Status: HKSessionApproved, BaseFee: 100000, Allowances: []HKAllowance{
-		{Amount: 30000, Status: HKAllowancePending},
-	}}
-	p := hkComputePay(s)
-	if p.Total != 100000 || p.AllowancePending != 30000 || p.Allowance != 0 {
-		t.Fatalf("%+v", p)
-	}
-}
-
-func TestPayApprovedAllowanceAdded(t *testing.T) {
-	s := &HKSession{Status: HKSessionApproved, BaseFee: 100000, Allowances: []HKAllowance{
-		{Amount: 30000, Status: HKAllowanceApproved},
-	}}
-	if p := hkComputePay(s); p.Total != 130000 {
-		t.Fatalf("muốn 130000 được %d", p.Total)
-	}
-}
-
-func TestPayRejectedAllowanceIgnored(t *testing.T) {
-	s := &HKSession{Status: HKSessionApproved, BaseFee: 100000, Allowances: []HKAllowance{
-		{Amount: 30000, Status: HKAllowanceRejected},
-	}}
-	p := hkComputePay(s)
-	if p.Total != 100000 || p.AllowancePending != 0 {
-		t.Fatalf("%+v", p)
-	}
-}
-
-// Công không bao giờ âm — trừ quá tay là lỗi nhập liệu, không phải chính sách.
-func TestPayDeductionCappedAtBase(t *testing.T) {
-	s := &HKSession{Status: HKSessionApproved, BaseFee: 100000, Deduction: 500000}
-	p := hkComputePay(s)
-	if p.Deduction != 100000 || p.Total != 0 {
-		t.Fatalf("%+v", p)
-	}
-}
-
-func TestPayNegativeDeductionIgnored(t *testing.T) {
-	s := &HKSession{Status: HKSessionApproved, BaseFee: 100000, Deduction: -50000}
-	if p := hkComputePay(s); p.Total != 100000 {
-		t.Fatalf("trừ âm không được thành thưởng, được %d", p.Total)
-	}
-}
-
-func TestPayPendingAllowanceCountedEvenWhenUnpayable(t *testing.T) {
-	s := &HKSession{Status: HKSessionInProgress, BaseFee: 100000, Allowances: []HKAllowance{
-		{Amount: 20000, Status: HKAllowancePending},
-	}}
-	p := hkComputePay(s)
-	if p.Total != 0 || p.AllowancePending != 20000 {
-		t.Fatalf("%+v", p)
-	}
-}
-
-// ─── Bảng công ────────────────────────────────────────────────────────────
-
-func TestTimesheetSeparatesConfirmedAndProvisional(t *testing.T) {
-	users := map[string]HKUser{"u1": {ID: "u1", Name: "Lan", Phone: "091"}}
-	rows := hkBuildTimesheet([]HKSession{
-		{StaffID: "u1", Status: HKSessionApproved, BaseFee: 100000},
-		{StaffID: "u1", Status: HKSessionSubmitted, BaseFee: 80000},
-		{StaffID: "u1", Status: HKSessionRejected, BaseFee: 140000},
-	}, users)
-	if len(rows) != 1 {
-		t.Fatalf("muốn 1 dòng được %d", len(rows))
-	}
-	r := rows[0]
-	if r.ConfirmedTotal != 100000 || r.ProvisionalTotal != 80000 || r.Total != 180000 {
-		t.Fatalf("%+v", r)
-	}
-	if r.Rooms != 2 || r.Rejected != 1 {
-		t.Fatalf("đếm phòng sai: %+v", r)
-	}
-}
-
-func TestTimesheetSortedByTotalDesc(t *testing.T) {
-	users := map[string]HKUser{
-		"u1": {ID: "u1", Name: "Lan"},
-		"u2": {ID: "u2", Name: "Hoa"},
-	}
-	rows := hkBuildTimesheet([]HKSession{
-		{StaffID: "u1", Status: HKSessionApproved, BaseFee: 80000},
-		{StaffID: "u2", Status: HKSessionApproved, BaseFee: 140000},
-		{StaffID: "u2", Status: HKSessionApproved, BaseFee: 100000},
-	}, users)
-	if rows[0].Name != "Hoa" || rows[0].Total != 240000 {
-		t.Fatalf("phải sắp theo tổng giảm dần: %+v", rows)
-	}
-}
-
-func TestTimesheetSkipsUnassigned(t *testing.T) {
-	rows := hkBuildTimesheet([]HKSession{{StaffID: "", Status: HKSessionApproved, BaseFee: 100000}}, nil)
-	if len(rows) != 0 {
-		t.Fatalf("ca chưa xếp người không tạo dòng: %+v", rows)
-	}
-}
-
-// Ca trỏ tới tài khoản đã xoá vẫn phải hiện — nuốt mất nó là nuốt mất tiền của
-// một người đã làm việc thật.
-func TestTimesheetKeepsOrphanSession(t *testing.T) {
-	rows := hkBuildTimesheet([]HKSession{{StaffID: "ghost", Status: HKSessionApproved, BaseFee: 100000}}, nil)
-	if len(rows) != 1 || rows[0].Name != "Không rõ" {
-		t.Fatalf("%+v", rows)
-	}
-}
-
 // ─── Chuẩn hoá số điện thoại ──────────────────────────────────────────────
 
 func TestNormalizePhone(t *testing.T) {
@@ -300,8 +168,5 @@ func TestRoomTypeFromBedrooms(t *testing.T) {
 		if got := hkRoomTypeFromBedrooms(in); got != want {
 			t.Errorf("%d phòng ngủ → muốn %s được %s", in, want, got)
 		}
-	}
-	if hkDefaultBaseFee("two_bedroom") != 140000 {
-		t.Fatal("đơn giá 2PN sai")
 	}
 }

@@ -19,9 +19,12 @@ package main
 // lúc cắm API thật vào thì phần còn lại không phải sửa.
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -68,6 +71,7 @@ type hkRawListing struct {
 	CheckinHour  int            `json:"checkin_hour"`
 	CheckoutHour int            `json:"checkout_hour"`
 	CheckinGuide hkCheckinGuide `json:"checkin_guide"`
+	CleanTime    int            `json:"clean_time"` // đệm dọn dẹp giữa hai lượt khách, giờ
 	Status       string         `json:"status"`
 	Host         hkListingHost  `json:"host"`
 }
@@ -149,7 +153,7 @@ func (a *HKApp) hkSyncRooms(limit int) (added, updated int, err error) {
 			HostName:   strings.TrimSpace(l.Host.Fullname),
 			TemplateID: hkTemplateForRoomType(templates, roomType),
 			DoorNote:   hkTrimGuide(l.CheckinGuide.plainText()),
-			BaseFee:    hkDefaultBaseFee(roomType),
+			CleanTime:  hkHourOr(l.CleanTime, 1),
 			CheckinHr:  hkHourOr(l.CheckinHour, 14),
 			CheckoutHr: hkHourOr(l.CheckoutHour, 11),
 			Active:     true,
@@ -260,91 +264,99 @@ func hkTemplateForRoomType(templates []HKTemplate, roomType string) string {
 	return ""
 }
 
-// ─── Sinh ca dọn ──────────────────────────────────────────────────────────
+// ─── Sinh ca dọn từ lịch đặt phòng ────────────────────────────────────────
 
-// hkCheckout là một lượt khách trả phòng — hình dạng mà API reservations sẽ trả.
-type hkCheckout struct {
-	RoomID        string
-	CheckoutAt    int64
-	NextCheckinAt int64
-	GuestNote     string
-}
-
-// hkFetchCheckouts LÀ CHỖ CẮM API THẬT.
+// hkSyncSessions đọc iCal của mọi phòng đang vận hành và tạo ca dọn cho các lượt
+// khách trả phòng trong khoảng [hôm nay − 1, hôm nay + ahead] ngày.
 //
-// Khi có endpoint reservations của host (kèm token), thay thân hàm này bằng lời
-// gọi thật; mọi thứ phía sau — tạo ca, gán người, chấm công — không phải sửa.
+// Lùi 1 ngày để bắt lượt trả phòng hôm qua mà chưa ai dọn — nếu chỉ nhìn từ hôm
+// nay thì ca bị bỏ sót sẽ biến mất khỏi màn hình thay vì hiện ra để xử lý.
 //
-// Hiện trả lỗi rõ ràng thay vì trả rỗng lặng lẽ, để không ai nhầm "hôm nay không
-// có khách trả phòng" với "chưa đấu API".
-func (a *HKApp) hkFetchCheckouts(day string) ([]hkCheckout, error) {
-	return nil, fmt.Errorf("chưa đấu API lịch đặt phòng của host — xem hkFetchCheckouts() trong backend/hk_sync.go")
-}
-
-// hkCreateSession tạo một ca dọn. Đường duy nhất để ca ra đời, dù nguồn là quản
-// lý thêm tay, lịch mô phỏng, hay API thật sau này.
-//
-// Trả về (ca, đã tạo mới?, lỗi). đã-tạo-mới = false nghĩa là phòng đó đã có ca
-// trong ngày — không phải lỗi, chỉ là chạy đồng bộ lần thứ hai.
-func (a *HKApp) hkCreateSession(roomID, day string, checkoutAt, nextCheckinAt int64, guestNote string) (HKSession, bool, error) {
-	room, err := a.store.RoomByID(roomID)
+// Chạy lại bao nhiêu lần cũng không đẻ ca trùng: khoá là mã lượt đặt trong iCal.
+func (a *HKApp) hkSyncSessions(ahead int) (created int, skipped int, err error) {
+	if ahead <= 0 {
+		ahead = 14
+	}
+	rooms, err := a.store.ListRooms(true)
 	if err != nil {
-		return HKSession{}, false, fmt.Errorf("không tìm thấy phòng %s", roomID)
+		return 0, 0, err
+	}
+	if len(rooms) == 0 {
+		return 0, 0, fmt.Errorf("chưa có phòng nào — bấm Đồng bộ phòng trước")
 	}
 
 	loc := time.Now().Location()
-	dayStart, err := time.ParseInLocation("2006-01-02", day, loc)
-	if err != nil {
-		return HKSession{}, false, fmt.Errorf("ngày không hợp lệ: %s", day)
-	}
-	if checkoutAt <= 0 {
-		checkoutAt = dayStart.Add(time.Duration(room.CheckoutHr) * time.Hour).UnixMilli()
-	}
-	// Hạn xong = giờ khách sau nhận phòng. Không có khách sau thì lấy giờ nhận
-	// phòng chuẩn của căn đó làm hạn mềm — vẫn cần một mốc để xếp việc trong ngày.
-	deadline := nextCheckinAt
-	if deadline <= 0 {
-		deadline = dayStart.Add(time.Duration(room.CheckinHr) * time.Hour).UnixMilli()
-	}
+	today := time.Now().In(loc)
+	from := today.AddDate(0, 0, -1).Format("2006-01-02")
+	to := today.AddDate(0, 0, ahead).Format("2006-01-02")
+	client := &http.Client{Timeout: 25 * time.Second}
 
+	var failed int
+	for _, room := range rooms {
+		events, e := hkFetchICal(client, room.ListingID, loc)
+		if e != nil {
+			// Một feed hỏng không được làm hỏng cả lượt đồng bộ.
+			failed++
+			log.Printf("[hk] iCal %s lỗi: %v", room.ListingID, e)
+			continue
+		}
+		for _, turn := range hkTurnsFromEvents(room, events, room.CleanTime, loc) {
+			if turn.Day < from || turn.Day > to {
+				continue
+			}
+			ok, e := a.hkCreateSessionFromTurn(room, turn)
+			if e != nil {
+				log.Printf("[hk] tạo ca %s lỗi: %v", turn.UID, e)
+				continue
+			}
+			if ok {
+				created++
+			} else {
+				skipped++
+			}
+		}
+	}
+	if failed > 0 {
+		log.Printf("[hk] đồng bộ lịch: tạo %d ca, bỏ qua %d ca đã có, %d phòng lỗi feed", created, skipped, failed)
+	}
+	return created, skipped, nil
+}
+
+// hkCreateSessionFromTurn tạo một ca dọn từ một lượt khách rời phòng.
+// Trả false khi lượt đó đã có ca — không phải lỗi, chỉ là đồng bộ chạy lại.
+func (a *HKApp) hkCreateSessionFromTurn(room HKRoom, turn hkTurn) (bool, error) {
 	var snapshot *HKTemplate
 	if room.TemplateID != "" {
 		if t, err := a.store.TemplateByID(room.TemplateID); err == nil {
 			snapshot = &t
 		}
 	}
-
+	nextCheckin := int64(0)
+	if turn.HasNext {
+		nextCheckin = turn.DeadlineAt.UnixMilli()
+	}
 	sess := HKSession{
-		ID:            fmt.Sprintf("hks_%s_%s", day, room.ID),
-		Day:           day,
-		RoomID:        room.ID,
-		ListingID:     room.ListingID,
-		TemplateID:    room.TemplateID,
-		Status:        HKSessionTodo,
-		CheckoutAt:    checkoutAt,
-		NextCheckinAt: nextCheckinAt,
-		DeadlineAt:    deadline,
-		GuestNote:     guestNote,
-		BaseFee:       room.BaseFee,
-		ItemsState:    map[string]HKItemState{},
-		Allowances:    []HKAllowance{},
-
+		ID:               "hks_" + hkShortHash(turn.UID),
+		Day:              turn.Day,
+		RoomID:           room.ID,
+		ListingID:        room.ListingID,
+		TemplateID:       room.TemplateID,
+		BookingUID:       turn.UID,
+		Status:           HKSessionTodo,
+		CheckoutAt:       turn.CheckoutAt.UnixMilli(),
+		NextCheckinAt:    nextCheckin,
+		DeadlineAt:       turn.DeadlineAt.UnixMilli(),
+		ItemsState:       map[string]HKItemState{},
 		TemplateSnapshot: snapshot,
+		StaffID:          a.hkSuggestStaff(room.Zone),
 	}
-	// Gợi ý người phụ trách theo khu vực; quản lý đổi lại được trên màn điều phối.
-	sess.StaffID = a.hkSuggestStaff(room.Zone)
+	return a.store.InsertSessionIfAbsent(sess)
+}
 
-	created, err := a.store.InsertSessionIfAbsent(sess)
-	if err != nil {
-		return sess, false, err
-	}
-	if !created {
-		existing, err := a.store.SessionByID(sess.ID)
-		if err == nil {
-			return existing, false, nil
-		}
-	}
-	return sess, created, nil
+// hkShortHash rút mã lượt đặt dài của iCal thành id ngắn, ổn định.
+func hkShortHash(s string) string {
+	sum := sha1.Sum([]byte(s))
+	return hex.EncodeToString(sum[:8])
 }
 
 // hkSuggestStaff chọn cô đang làm và nhận khu vực này. Trả rỗng khi không ai

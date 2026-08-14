@@ -94,7 +94,7 @@ func (s *HKStore) migrate() error {
 			host_name TEXT NOT NULL DEFAULT '',
 			template_id TEXT NOT NULL DEFAULT '',
 			door_note TEXT NOT NULL DEFAULT '',
-			base_fee INTEGER NOT NULL DEFAULT 0,
+			clean_time INTEGER NOT NULL DEFAULT 1,
 			checkin_hour INTEGER NOT NULL DEFAULT 14,
 			checkout_hour INTEGER NOT NULL DEFAULT 11,
 			active INTEGER NOT NULL DEFAULT 1,
@@ -119,8 +119,7 @@ func (s *HKStore) migrate() error {
 			next_checkin_at INTEGER NOT NULL DEFAULT 0,
 			deadline_at INTEGER NOT NULL DEFAULT 0,
 			guest_note TEXT NOT NULL DEFAULT '',
-			base_fee INTEGER NOT NULL DEFAULT 0,
-			deduction INTEGER NOT NULL DEFAULT 0,
+			booking_uid TEXT NOT NULL DEFAULT '',
 			items_state TEXT NOT NULL DEFAULT '{}',
 			template_snapshot TEXT NOT NULL DEFAULT '',
 			started_at INTEGER NOT NULL DEFAULT 0,
@@ -134,18 +133,10 @@ func (s *HKStore) migrate() error {
 		`CREATE INDEX IF NOT EXISTS hk_session_checkout ON hk_session(checkout_at)`,
 		// Một phòng chỉ có một ca mỗi ngày — chặn ở tầng DB để job đồng bộ chạy hai
 		// lần không đẻ ra hai ca, kéo theo trả tiền hai lần.
-		`CREATE UNIQUE INDEX IF NOT EXISTS hk_session_room_day ON hk_session(room_id, day)`,
-		`CREATE TABLE IF NOT EXISTS hk_allowance (
-			id TEXT PRIMARY KEY,
-			session_id TEXT NOT NULL REFERENCES hk_session(id) ON DELETE CASCADE,
-			type TEXT NOT NULL,
-			amount INTEGER NOT NULL DEFAULT 0,
-			note TEXT NOT NULL DEFAULT '',
-			photos TEXT NOT NULL DEFAULT '[]',
-			status TEXT NOT NULL,
-			created_at INTEGER NOT NULL
-		)`,
-		`CREATE INDEX IF NOT EXISTS hk_allowance_session ON hk_allowance(session_id)`,
+		// Khoá chống trùng là MÃ LƯỢT ĐẶT, không phải (phòng, ngày): 59/60 phòng
+		// cho thuê theo giờ nên một phòng có nhiều lượt khách trong một ngày, mỗi
+		// lượt phải là một ca dọn kỹ riêng.
+		`CREATE UNIQUE INDEX IF NOT EXISTS hk_session_booking ON hk_session(booking_uid)`,
 	}
 	for _, q := range stmts {
 		if _, err := s.db.Exec(q); err != nil {
@@ -282,13 +273,13 @@ func (s *HKStore) PurgeExpiredTokens(now int64) error {
 // ─── Phòng ────────────────────────────────────────────────────────────────
 
 const roomCols = `id, listing_id, code, name, address, zone, room_type, host_id, host_name,
-	template_id, door_note, base_fee, checkin_hour, checkout_hour, active, synced_at`
+	template_id, door_note, clean_time, checkin_hour, checkout_hour, active, synced_at`
 
 func scanRoom(row interface{ Scan(...interface{}) error }) (HKRoom, error) {
 	var r HKRoom
 	var active int
 	err := row.Scan(&r.ID, &r.ListingID, &r.Code, &r.Name, &r.Address, &r.Zone, &r.RoomType,
-		&r.HostID, &r.HostName, &r.TemplateID, &r.DoorNote, &r.BaseFee,
+		&r.HostID, &r.HostName, &r.TemplateID, &r.DoorNote, &r.CleanTime,
 		&r.CheckinHr, &r.CheckoutHr, &active, &r.SyncedAt)
 	r.Active = active != 0
 	return r, err
@@ -313,15 +304,15 @@ func (s *HKStore) UpsertRoom(r HKRoom) error {
 			checkin_hour=excluded.checkin_hour, checkout_hour=excluded.checkout_hour,
 			active=excluded.active, synced_at=excluded.synced_at`,
 		r.ID, r.ListingID, r.Code, r.Name, r.Address, r.Zone, r.RoomType, r.HostID, r.HostName,
-		r.TemplateID, r.DoorNote, r.BaseFee, r.CheckinHr, r.CheckoutHr, active, r.SyncedAt)
+		r.TemplateID, r.DoorNote, r.CleanTime, r.CheckinHr, r.CheckoutHr, active, r.SyncedAt)
 	return err
 }
 
-func (s *HKStore) UpdateRoomSettings(id, templateID, doorNote string, baseFee int64) error {
+func (s *HKStore) UpdateRoomSettings(id, templateID, doorNote string) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	_, err := s.db.Exec(`UPDATE hk_room SET template_id=?, door_note=?, base_fee=? WHERE id=?`,
-		templateID, doorNote, baseFee, id)
+	_, err := s.db.Exec(`UPDATE hk_room SET template_id=?, door_note=? WHERE id=?`,
+		templateID, doorNote, id)
 	return err
 }
 
@@ -407,14 +398,14 @@ func (s *HKStore) TemplateByID(id string) (HKTemplate, error) {
 // ─── Ca dọn ───────────────────────────────────────────────────────────────
 
 const sessionCols = `id, day, room_id, listing_id, template_id, staff_id, status,
-	checkout_at, next_checkin_at, deadline_at, guest_note, base_fee, deduction,
+	checkout_at, next_checkin_at, deadline_at, guest_note, booking_uid,
 	items_state, template_snapshot, started_at, submitted_at, reviewed_at, reviewed_by, review_note`
 
 func scanSession(row interface{ Scan(...interface{}) error }) (HKSession, error) {
 	var s HKSession
 	var itemsState, snapshot string
 	err := row.Scan(&s.ID, &s.Day, &s.RoomID, &s.ListingID, &s.TemplateID, &s.StaffID, &s.Status,
-		&s.CheckoutAt, &s.NextCheckinAt, &s.DeadlineAt, &s.GuestNote, &s.BaseFee, &s.Deduction,
+		&s.CheckoutAt, &s.NextCheckinAt, &s.DeadlineAt, &s.GuestNote, &s.BookingUID,
 		&itemsState, &snapshot, &s.StartedAt, &s.SubmittedAt, &s.ReviewedAt, &s.ReviewedBy, &s.ReviewNote)
 	if err != nil {
 		return s, err
@@ -429,7 +420,6 @@ func scanSession(row interface{ Scan(...interface{}) error }) (HKSession, error)
 			s.TemplateSnapshot = &t
 		}
 	}
-	s.Allowances = []HKAllowance{}
 	return s, nil
 }
 
@@ -441,9 +431,9 @@ func (s *HKStore) InsertSessionIfAbsent(sess HKSession) (bool, error) {
 	defer s.writeMu.Unlock()
 	res, err := s.db.Exec(`
 		INSERT OR IGNORE INTO hk_session (`+sessionCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		sess.ID, sess.Day, sess.RoomID, sess.ListingID, sess.TemplateID, sess.StaffID, sess.Status,
-		sess.CheckoutAt, sess.NextCheckinAt, sess.DeadlineAt, sess.GuestNote, sess.BaseFee, sess.Deduction,
+		sess.CheckoutAt, sess.NextCheckinAt, sess.DeadlineAt, sess.GuestNote, sess.BookingUID,
 		jsonMarshalString(sess.ItemsState), snapshotJSON(sess.TemplateSnapshot),
 		sess.StartedAt, sess.SubmittedAt, sess.ReviewedAt, sess.ReviewedBy, sess.ReviewNote)
 	if err != nil {
@@ -464,10 +454,10 @@ func (s *HKStore) UpdateSession(sess HKSession) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	_, err := s.db.Exec(`
-		UPDATE hk_session SET staff_id=?, status=?, guest_note=?, base_fee=?, deduction=?,
+		UPDATE hk_session SET staff_id=?, status=?, guest_note=?,
 			items_state=?, started_at=?, submitted_at=?, reviewed_at=?, reviewed_by=?, review_note=?
 		WHERE id=?`,
-		sess.StaffID, sess.Status, sess.GuestNote, sess.BaseFee, sess.Deduction,
+		sess.StaffID, sess.Status, sess.GuestNote,
 		jsonMarshalString(sess.ItemsState), sess.StartedAt, sess.SubmittedAt,
 		sess.ReviewedAt, sess.ReviewedBy, sess.ReviewNote, sess.ID)
 	return err
@@ -512,118 +502,25 @@ func (s *HKStore) ListSessions(f HKSessionFilter) ([]HKSession, error) {
 	}
 	defer rows.Close()
 	out := []HKSession{}
-	ids := []string{}
 	for rows.Next() {
 		sess, err := scanSession(rows)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, sess)
-		ids = append(ids, sess.ID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	// Nạp phụ cấp trong MỘT truy vấn thay vì mỗi ca một lần — bảng công tháng có
-	// vài trăm ca, N+1 ở đây là chờ vài giây trắng màn.
-	byID, err := s.allowancesFor(ids)
-	if err != nil {
-		return nil, err
-	}
-	for i := range out {
-		if list, ok := byID[out[i].ID]; ok {
-			out[i].Allowances = list
-		}
-	}
-	return out, nil
-}
-
-func (s *HKStore) SessionByID(id string) (HKSession, error) {
-	sess, err := scanSession(s.db.QueryRow(`SELECT `+sessionCols+` FROM hk_session WHERE id = ?`, id))
-	if err != nil {
-		return sess, err
-	}
-	byID, err := s.allowancesFor([]string{id})
-	if err != nil {
-		return sess, err
-	}
-	if list, ok := byID[id]; ok {
-		sess.Allowances = list
-	}
-	return sess, nil
-}
-
-func (s *HKStore) allowancesFor(sessionIDs []string) (map[string][]HKAllowance, error) {
-	out := map[string][]HKAllowance{}
-	if len(sessionIDs) == 0 {
-		return out, nil
-	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(sessionIDs)), ",")
-	args := make([]interface{}, len(sessionIDs))
-	for i, id := range sessionIDs {
-		args[i] = id
-	}
-	rows, err := s.db.Query(`
-		SELECT id, session_id, type, amount, note, photos, status, created_at
-		FROM hk_allowance WHERE session_id IN (`+placeholders+`) ORDER BY created_at`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var a HKAllowance
-		var photos string
-		if err := rows.Scan(&a.ID, &a.SessionID, &a.Type, &a.Amount, &a.Note, &photos, &a.Status, &a.CreatedAt); err != nil {
-			return nil, err
-		}
-		json.Unmarshal([]byte(photos), &a.Photos)
-		if a.Photos == nil {
-			a.Photos = []HKPhoto{}
-		}
-		out[a.SessionID] = append(out[a.SessionID], a)
 	}
 	return out, rows.Err()
 }
 
-func (s *HKStore) InsertAllowance(a HKAllowance) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	_, err := s.db.Exec(`
-		INSERT INTO hk_allowance (id, session_id, type, amount, note, photos, status, created_at)
-		VALUES (?,?,?,?,?,?,?,?)`,
-		a.ID, a.SessionID, a.Type, a.Amount, a.Note, jsonMarshalString(a.Photos), a.Status, a.CreatedAt)
-	return err
-}
-
-func (s *HKStore) ReviewAllowance(id, status string, amount int64, setAmount bool) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if setAmount {
-		_, err := s.db.Exec(`UPDATE hk_allowance SET status=?, amount=? WHERE id=?`, status, amount, id)
-		return err
-	}
-	_, err := s.db.Exec(`UPDATE hk_allowance SET status=? WHERE id=?`, status, id)
-	return err
-}
-
-func (s *HKStore) AllowanceByID(id string) (HKAllowance, error) {
-	var a HKAllowance
-	var photos string
-	err := s.db.QueryRow(`
-		SELECT id, session_id, type, amount, note, photos, status, created_at
-		FROM hk_allowance WHERE id = ?`, id).
-		Scan(&a.ID, &a.SessionID, &a.Type, &a.Amount, &a.Note, &photos, &a.Status, &a.CreatedAt)
-	if err != nil {
-		return a, err
-	}
-	json.Unmarshal([]byte(photos), &a.Photos)
-	return a, nil
+func (s *HKStore) SessionByID(id string) (HKSession, error) {
+	sess, err := scanSession(s.db.QueryRow(`SELECT `+sessionCols+` FROM hk_session WHERE id = ?`, id))
+	return sess, err
 }
 
 func (s *HKStore) CountRows(table string) (int, error) {
 	// Chỉ nhận tên bảng nội bộ — không nhận đầu vào từ người dùng.
 	switch table {
-	case "hk_user", "hk_room", "hk_template", "hk_session", "hk_allowance":
+	case "hk_user", "hk_room", "hk_template", "hk_session":
 	default:
 		return 0, fmt.Errorf("bảng không hợp lệ: %s", table)
 	}

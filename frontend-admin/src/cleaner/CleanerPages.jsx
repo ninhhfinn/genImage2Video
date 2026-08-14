@@ -1,7 +1,10 @@
-// Ba màn của cô dọn dẹp: ca hôm nay, checklist một phòng, công của tôi.
+// Ba màn của cô dọn dẹp: ca hôm nay, checklist một phòng, kết quả của tôi.
 //
 // Thiết kế cho điện thoại tầm trung, tay ướt, ánh đèn phòng tắm: chữ ≥15px,
 // vùng chạm ≥44px, điều hướng ở đáy màn hình vừa tầm ngón cái.
+//
+// KHÔNG có tiền ở đây. Lương tính theo cơ chế riêng ngoài phần mềm; màn này chỉ
+// cho cô thấy việc đã làm và khách đánh giá thế nào.
 
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api.js'
@@ -10,16 +13,13 @@ import { useRouter } from '../router.jsx'
 import PhotoUploader from '../components/PhotoUploader.jsx'
 import { Alert, Empty, Progress, Spinner } from '../components/ui.jsx'
 import {
-	ALLOWANCE_LABEL,
 	ROOM_TYPE_LABEL,
 	SESSION_LABEL,
 	dayKey,
 	dayMonth,
 	hour,
-	money,
-	monthKey,
-	monthLabel,
-	shiftMonth,
+	minutes,
+	shiftDay,
 } from '../format.js'
 
 export function CleanerShell({ active, title, back, children }) {
@@ -57,9 +57,9 @@ export function CleanerShell({ active, title, back, children }) {
 					<span>📋</span>
 					<span>Ca hôm nay</span>
 				</button>
-				<button className={`mob-tab${active === 'pay' ? ' active' : ''}`} onClick={() => navigate('/cleaning/pay')}>
-					<span>💵</span>
-					<span>Công của tôi</span>
+				<button className={`mob-tab${active === 'me' ? ' active' : ''}`} onClick={() => navigate('/cleaning/me')}>
+					<span>📊</span>
+					<span>Kết quả</span>
 				</button>
 			</nav>
 		</div>
@@ -91,7 +91,7 @@ export function CleanerTodayPage() {
 	)
 
 	const remaining = rows.filter((s) => s.status === 'todo' || s.status === 'in_progress').length
-	const earned = rows.reduce((sum, s) => sum + (s.pay?.total || 0), 0)
+	const done = rows.filter((s) => s.status === 'submitted' || s.status === 'approved').length
 
 	return (
 		<CleanerShell active="today" title="Ca hôm nay">
@@ -101,8 +101,8 @@ export function CleanerTodayPage() {
 					<span>phòng còn phải dọn</span>
 				</div>
 				<div>
-					<strong>{money(earned)}</strong>
-					<span>công hôm nay</span>
+					<strong>{done}</strong>
+					<span>phòng đã xong</span>
 				</div>
 			</div>
 
@@ -115,11 +115,11 @@ export function CleanerTodayPage() {
 			) : (
 				<div className="mob-list">
 					{rows.map((s) => {
-						const done = s.status === 'submitted' || s.status === 'approved'
+						const finished = s.status === 'submitted' || s.status === 'approved'
 						return (
 							<button
 								key={s.id}
-								className={`mob-card${done ? ' mob-card--done' : ''}`}
+								className={`mob-card${finished ? ' mob-card--done' : ''}`}
 								onClick={() => navigate(`/cleaning/session/${s.id}`)}
 							>
 								<div className="mob-card-top">
@@ -133,6 +133,7 @@ export function CleanerTodayPage() {
 								<div className="mob-card-addr">📍 {s.room?.address}</div>
 								<div className="mob-card-meta">
 									{ROOM_TYPE_LABEL[s.room?.room_type] || s.room?.room_type} · khách trả phòng {hour(s.checkout_at)}
+									{s.next_checkin_at ? ' · có khách vào ngay sau' : ''}
 								</div>
 
 								{s.guest_note && <div className="mob-note">Lưu ý: {s.guest_note}</div>}
@@ -143,7 +144,7 @@ export function CleanerTodayPage() {
 									<span>
 										{s.progress?.done_required}/{s.progress?.total_required} việc
 									</span>
-									<strong>{money(s.pay?.payable ? s.pay.total : s.base_fee)}</strong>
+									{finished && !!s.minutes && <strong>{minutes(s.minutes)}</strong>}
 								</div>
 
 								{s.status === 'rejected' && s.review_note && (
@@ -164,7 +165,6 @@ export function CleanerSessionPage({ sessionId }) {
 	const [session, setSession] = useState(null)
 	const [err, setErr] = useState('')
 	const [openGroup, setOpenGroup] = useState('')
-	const [allowanceOpen, setAllowanceOpen] = useState(false)
 
 	useEffect(() => {
 		api
@@ -183,6 +183,15 @@ export function CleanerSessionPage({ sessionId }) {
 			const d = await api.saveItem(sessionId, itemId, patch)
 			setSession(d.session)
 			setErr('')
+		} catch (e) {
+			setErr(e.message)
+		}
+	}
+
+	async function start() {
+		try {
+			const d = await api.startSession(sessionId)
+			setSession(d.session)
 		} catch (e) {
 			setErr(e.message)
 		}
@@ -217,13 +226,18 @@ export function CleanerSessionPage({ sessionId }) {
 				{session.guest_note && <div className="mob-note">Lưu ý: {session.guest_note}</div>}
 			</div>
 
+			{!session.started_at && !submitted && (
+				<button className="btn btn--primary btn--big" onClick={start}>
+					Bắt đầu dọn
+				</button>
+			)}
+
 			{submitted && (
 				<div className="banner banner--ok">
-					<strong>Đã đủ ảnh — công của bạn đã được ghi nhận.</strong>
+					<strong>Đã đủ ảnh — ca này ghi nhận xong.</strong>
 					<span>
-						{session.status === 'approved'
-							? `Quản lý đã duyệt: ${money(session.pay?.total)}.`
-							: `${money(session.pay?.total)} đang chờ quản lý đối soát.`}
+						{session.minutes ? `Bạn dọn hết ${minutes(session.minutes)}. ` : ''}
+						{session.status === 'approved' ? 'Quản lý đã duyệt.' : 'Đang chờ quản lý xem ảnh.'}
 					</span>
 				</div>
 			)}
@@ -302,34 +316,9 @@ export function CleanerSessionPage({ sessionId }) {
 				})}
 			</div>
 
-			<div className="allow-box">
-				<div className="allow-head">
-					<strong>Phụ cấp phát sinh</strong>
-					{!locked && (
-						<button className="btn btn--ghost" onClick={() => setAllowanceOpen(true)}>
-							+ Đề nghị
-						</button>
-					)}
-				</div>
-				{(session.allowances || []).length ? (
-					session.allowances.map((a) => (
-						<div key={a.id} className="allow-row">
-							<span>{a.type}</span>
-							<span>{money(a.amount)}</span>
-							<span className={`pill pill--${a.status}`}>{ALLOWANCE_LABEL[a.status]}</span>
-						</div>
-					))
-				) : (
-					<p className="help">
-						Có việc ngoài checklist (giặt chăn ga, khách để quá bẩn…)? Bấm Đề nghị và chụp ảnh, quản lý sẽ duyệt thêm
-						tiền.
-					</p>
-				)}
-			</div>
-
 			<div className="mob-bottom">
 				{p.complete ? (
-					<div className="mob-bottom-ok">✅ Xong hết rồi — {money(session.pay?.payable ? session.pay.total : session.base_fee)}</div>
+					<div className="mob-bottom-ok">✅ Xong hết rồi</div>
 				) : (
 					<div className="mob-bottom-todo">
 						<Progress percent={p.percent} />
@@ -342,17 +331,6 @@ export function CleanerSessionPage({ sessionId }) {
 					</div>
 				)}
 			</div>
-
-			{allowanceOpen && (
-				<AllowanceModal
-					sessionId={sessionId}
-					onClose={() => setAllowanceOpen(false)}
-					onSaved={(s) => {
-						setSession(s)
-						setAllowanceOpen(false)
-					}}
-				/>
-			)}
 		</CleanerShell>
 	)
 }
@@ -363,168 +341,125 @@ function isDone(session, item) {
 	return (st.photos || []).length >= (item.min_photos || 1)
 }
 
-function AllowanceModal({ sessionId, onClose, onSaved }) {
-	const [types, setTypes] = useState([])
-	const [type, setType] = useState('bed_linen')
-	const [amount, setAmount] = useState('30000')
-	const [note, setNote] = useState('')
-	const [photos, setPhotos] = useState([])
-	const [err, setErr] = useState('')
-	const [busy, setBusy] = useState(false)
+// ─── Kết quả của tôi ──────────────────────────────────────────────────────
 
-	useEffect(() => {
-		api.meta().then((d) => setTypes(d.allowance_types || [])).catch(() => {})
-	}, [])
-
-	async function submit() {
-		setBusy(true)
-		setErr('')
-		try {
-			const d = await api.addAllowance({
-				session_id: sessionId,
-				type,
-				amount: Number(amount) || 0,
-				note,
-				photos,
-			})
-			onSaved(d.session)
-		} catch (e) {
-			setErr(e.message)
-		} finally {
-			setBusy(false)
-		}
-	}
-
-	return (
-		<div className="modal" onClick={onClose}>
-			<div className="modal-in" onClick={(e) => e.stopPropagation()}>
-				<h2>Đề nghị phụ cấp</h2>
-
-				<label className="field">
-					<span>Loại việc phát sinh</span>
-					<select
-						value={type}
-						onChange={(e) => {
-							setType(e.target.value)
-							const t = types.find((x) => x.key === e.target.value)
-							setAmount(t?.default_amount ? String(t.default_amount) : '')
-						}}
-					>
-						{types.map((t) => (
-							<option key={t.key} value={t.key}>
-								{t.label}
-							</option>
-						))}
-					</select>
-				</label>
-
-				<label className="field">
-					<span>Số tiền đề nghị (đ)</span>
-					<input type="number" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
-				</label>
-
-				<label className="field">
-					<span>Mô tả cho quản lý</span>
-					<input placeholder="VD: chăn dính bẩn phải giặt riêng" value={note} onChange={(e) => setNote(e.target.value)} />
-				</label>
-
-				<div className="field">
-					<span>Ảnh chứng minh</span>
-					<PhotoUploader photos={photos} max={3} onChange={setPhotos} compact />
-				</div>
-
-				<Alert>{err}</Alert>
-
-				<div className="modal-actions">
-					<button className="btn btn--ghost" onClick={onClose}>
-						Huỷ
-					</button>
-					<button className="btn btn--primary" disabled={busy || !Number(amount)} onClick={submit}>
-						{busy ? 'Đang gửi…' : 'Gửi đề nghị'}
-					</button>
-				</div>
-			</div>
-		</div>
-	)
-}
-
-// ─── Công của tôi ─────────────────────────────────────────────────────────
-
-export function CleanerPayPage() {
-	const { navigate } = useRouter()
-	const [month, setMonth] = useState(monthKey())
+export function CleanerMePage() {
+	const [day, setDay] = useState(dayKey())
 	const [data, setData] = useState(null)
+	const [reviews, setReviews] = useState(null)
 	const [err, setErr] = useState('')
 
 	useEffect(() => {
 		setData(null)
 		api
-			.timesheet(month)
+			.report({ day })
 			.then(setData)
 			.catch((e) => {
 				setErr(e.message)
 				setData({ rows: [], sessions: [] })
 			})
-	}, [month])
+	}, [day])
+
+	useEffect(() => {
+		api.reviews(14).then(setReviews).catch(() => setReviews({ stats: null }))
+	}, [])
 
 	const row = data?.rows?.[0]
-	const sessions = useMemo(
-		() => [...(data?.sessions || [])].sort((a, b) => (b.checkout_at || 0) - (a.checkout_at || 0)),
-		[data],
-	)
-	const thisMonth = monthKey()
+	const today = dayKey()
+	const st = reviews?.stats
 
 	return (
-		<CleanerShell active="pay" title="Công của tôi">
+		<CleanerShell active="me" title="Kết quả của tôi">
 			<div className="mob-month">
-				<button onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Tháng trước">‹</button>
-				<span>{monthLabel(month)}</span>
-				<button disabled={month >= thisMonth} onClick={() => setMonth(shiftMonth(month, 1))} aria-label="Tháng sau">
-					›
-				</button>
+				<button onClick={() => setDay(shiftDay(day, -1))} aria-label="Hôm trước">‹</button>
+				<span>{day === today ? 'Hôm nay' : dayMonth(new Date(day).getTime())}</span>
+				<button disabled={day >= today} onClick={() => setDay(shiftDay(day, 1))} aria-label="Hôm sau">›</button>
 			</div>
 
-			<div className="pay-total">
-				<span>Tổng công {monthLabel(month).toLowerCase()}</span>
-				<strong>{money(row?.total)}</strong>
-				<small>
-					{row?.rooms || 0} phòng · {money(row?.confirmed_total)} đã chốt
-					{row?.provisional_total ? ` · ${money(row.provisional_total)} chờ quản lý duyệt` : ''}
-				</small>
-			</div>
+			{data === null ? (
+				<Spinner />
+			) : (
+				<div className="mob-sum mob-sum--3">
+					<div>
+						<strong>{row?.sessions || 0}</strong>
+						<span>ca đã dọn</span>
+					</div>
+					<div>
+						<strong>{row?.rooms || 0}</strong>
+						<span>phòng</span>
+					</div>
+					<div>
+						<strong>{minutes(row?.avg_minute)}</strong>
+						<span>trung bình mỗi ca</span>
+					</div>
+				</div>
+			)}
 
-			{!!row?.allowance_pending && (
+			{!!row?.late && (
 				<div className="banner banner--warn">
-					<strong>{money(row.allowance_pending)} phụ cấp đang chờ duyệt</strong>
-					<span>Khoản này chưa được cộng vào tổng ở trên.</span>
+					<strong>{row.late} ca xong sau giờ khách vào</strong>
+					<span>Nếu do phòng quá bẩn hoặc thiếu đồ, báo quản lý để xếp thêm thời gian.</span>
 				</div>
 			)}
 
 			<Alert>{err}</Alert>
 
-			{data === null ? (
+			{/* Review là thước đo trực tiếp nhất việc dọn dẹp — cho cô thấy để tự
+			    cải thiện, không phải để quản lý giữ riêng làm cơ sở khiển trách. */}
+			<h2 className="mob-h2">Khách đánh giá (14 ngày qua)</h2>
+			{reviews === null ? (
 				<Spinner />
-			) : !sessions.length ? (
-				<Empty icon="💵">Tháng này chưa có phòng nào được ghi công.</Empty>
+			) : !st || !st.total ? (
+				<Empty icon="⭐">Chưa có đánh giá mới.</Empty>
 			) : (
-				<div className="paylist">
-					{sessions.map((s) => (
-						<div key={s.id} className="payrow" onClick={() => navigate(`/cleaning/session/${s.id}`)}>
-							<div className="payrow-date">{dayMonth(s.checkout_at)}</div>
-							<div className="payrow-main">
-								<div>{s.room?.name || s.room_id}</div>
-								<span className={`pill pill--${s.status}`}>{SESSION_LABEL[s.status]}</span>
-								{!!s.pay?.deduction && <span className="payrow-ded">bị trừ {money(s.pay.deduction)}</span>}
-							</div>
-							<div className="payrow-money">{s.status === 'rejected' ? '—' : money(s.pay?.total)}</div>
+				<>
+					<div className="mob-sum">
+						<div>
+							<strong>{st.avg_cleanliness ? st.avg_cleanliness.toFixed(1) : '—'}</strong>
+							<span>điểm sạch sẽ trung bình</span>
 						</div>
-					))}
-				</div>
+						<div>
+							<strong>{st.low_clean}</strong>
+							<span>lượt chê chưa sạch</span>
+						</div>
+					</div>
+
+					{st.need_attention?.length > 0 && (
+						<>
+							<h2 className="mob-h2">Cần chú ý</h2>
+							<div className="mob-list">
+								{st.need_attention.slice(0, 5).map((r) => (
+									<div key={r.id} className="rv rv--bad">
+										<div className="rv-top">
+											<span>{'⭐'.repeat(Math.max(1, r.cleanliness || r.overall))}</span>
+											<span className="rv-room">{r.room_code}</span>
+											<span className="rv-date">{dayMonth(r.created_at)}</span>
+										</div>
+										{r.comment && <div className="rv-text">{r.comment}</div>}
+									</div>
+								))}
+							</div>
+						</>
+					)}
+
+					<h2 className="mob-h2">Đánh giá gần đây</h2>
+					<div className="mob-list">
+						{st.recent.slice(0, 8).map((r) => (
+							<div key={r.id} className={`rv${r.overall >= 4 ? ' rv--good' : ''}`}>
+								<div className="rv-top">
+									<span>{'⭐'.repeat(Math.max(1, r.overall))}</span>
+									<span className="rv-room">{r.room_code}</span>
+									<span className="rv-date">{dayMonth(r.created_at)}</span>
+								</div>
+								{r.comment && <div className="rv-text">{r.comment}</div>}
+							</div>
+						))}
+					</div>
+				</>
 			)}
 
 			<p className="help">
-				Số tiền ở đây là công dọn phòng, chưa gồm khoản quản lý trả riêng. Có gì chưa đúng, nhắn quản lý kèm ngày và tên
-				phòng.
+				Số liệu ở đây để bạn theo dõi công việc. Lương và thưởng tính theo cơ chế riêng, không nằm trong phần mềm này.
 			</p>
 		</CleanerShell>
 	)

@@ -53,7 +53,7 @@ func newHKTestEnv(t *testing.T) *hkTestEnv {
 		ID: "ls_test_01", ListingID: "ls_test_01", Code: "CG-TEST01",
 		Name: "Căn thử nghiệm", Address: "1 Cầu Giấy, Hà Nội", Zone: "Cầu Giấy",
 		RoomType: "one_bedroom", HostName: "Chủ nhà thử", TemplateID: "hkt_studio",
-		BaseFee: 100000, CheckinHr: 14, CheckoutHr: 11, Active: true,
+		CleanTime: 1, CheckinHr: 14, CheckoutHr: 11, Active: true,
 	}
 	if err := app.store.UpsertRoom(room); err != nil {
 		t.Fatalf("tạo phòng: %v", err)
@@ -127,19 +127,37 @@ func (e *hkTestEnv) registerAndApprove(name, phone, password, zone string) strin
 	return out.User.ID
 }
 
+// createSession tạo ca qua đúng đường mà đồng bộ iCal dùng, chỉ khác là tự đặt
+// mã lượt đặt để test không phụ thuộc api.dayladau.com đang sống hay không.
 func (e *hkTestEnv) createSession(day string) HKSessionView {
 	e.t.Helper()
-	w := e.do("POST", "/api/hk/sessions/create", e.adminToken, map[string]interface{}{
-		"room_id": e.roomID, "day": day,
-	})
-	if w.Code != 200 {
-		e.t.Fatalf("tạo ca hỏng (%d): %s", w.Code, w.Body.String())
+	return e.createSessionUID(day, "uid-"+day+"-"+e.roomID)
+}
+
+func (e *hkTestEnv) createSessionUID(day, uid string) HKSessionView {
+	e.t.Helper()
+	room, err := e.app.store.RoomByID(e.roomID)
+	if err != nil {
+		e.t.Fatalf("đọc phòng: %v", err)
 	}
-	var out struct {
-		Session HKSessionView `json:"session"`
+	loc := time.Now().Location()
+	d, _ := time.ParseInLocation("2006-01-02", day, loc)
+	turn := hkTurn{
+		RoomID: room.ID, ListingID: room.ListingID, UID: uid, Day: day,
+		CheckoutAt: d.Add(11 * time.Hour), DeadlineAt: d.Add(14 * time.Hour),
 	}
-	e.decode(w, &out)
-	return out.Session
+	if _, err := e.app.hkCreateSessionFromTurn(room, turn); err != nil {
+		e.t.Fatalf("tạo ca: %v", err)
+	}
+	sess, err := e.app.store.SessionByID("hks_" + hkShortHash(uid))
+	if err != nil {
+		e.t.Fatalf("đọc ca vừa tạo: %v", err)
+	}
+	views, err := e.app.hkBuildViews([]HKSession{sess})
+	if err != nil || len(views) == 0 {
+		e.t.Fatalf("dựng view: %v", err)
+	}
+	return views[0]
 }
 
 // uploadPhoto đẩy một ảnh PNG thật (1×1) qua đúng endpoint upload.
@@ -340,7 +358,7 @@ func TestCleanerListIsForcedToOwnSessions(t *testing.T) {
 
 func TestNoTokenRejected(t *testing.T) {
 	e := newHKTestEnv(t)
-	for _, p := range []string{"/api/hk/sessions", "/api/hk/rooms", "/api/hk/me", "/api/hk/timesheet"} {
+	for _, p := range []string{"/api/hk/sessions", "/api/hk/rooms", "/api/hk/me", "/api/hk/report"} {
 		if w := e.do("GET", p, "", nil); w.Code != http.StatusUnauthorized {
 			t.Errorf("%s không token: muốn 401 được %d", p, w.Code)
 		}
@@ -365,13 +383,10 @@ func TestFullLifecycleAutoRecordsPay(t *testing.T) {
 	if !final.Progress.Complete {
 		t.Fatalf("phải đủ ảnh: %+v", final.Progress)
 	}
-	if final.Pay.Total != 100000 || final.Pay.Confirmed {
-		t.Fatalf("chờ đối soát phải ra tiền nhưng chưa chốt: %+v", final.Pay)
-	}
 
 	// Quản lý duyệt kèm trừ tiền.
 	w := e.do("POST", "/api/hk/sessions/review", e.adminToken, map[string]interface{}{
-		"id": sess.ID, "status": HKSessionApproved, "deduction": 20000, "note": "Thiếu giấy vệ sinh",
+		"id": sess.ID, "status": HKSessionApproved, "note": "Thiếu giấy vệ sinh",
 	})
 	if w.Code != 200 {
 		t.Fatalf("duyệt hỏng: %s", w.Body.String())
@@ -380,8 +395,8 @@ func TestFullLifecycleAutoRecordsPay(t *testing.T) {
 		Session HKSessionView `json:"session"`
 	}
 	e.decode(w, &out)
-	if out.Session.Pay.Total != 80000 || !out.Session.Pay.Confirmed {
-		t.Fatalf("sau khi trừ 20k muốn 80000 đã chốt: %+v", out.Session.Pay)
+	if out.Session.Status != HKSessionApproved {
+		t.Fatalf("muốn approved được %s", out.Session.Status)
 	}
 	if out.Session.ReviewNote != "Thiếu giấy vệ sinh" {
 		t.Fatalf("ghi chú hậu kiểm phải lưu để cô đọc được: %q", out.Session.ReviewNote)
@@ -445,142 +460,37 @@ func TestApprovedSessionIsLocked(t *testing.T) {
 		t.Fatalf("ca đã chốt công không được sửa nữa, muốn 409 được %d", w.Code)
 	}
 }
-
-// Một phòng chỉ có một ca mỗi ngày — chạy đồng bộ hai lần không được đẻ ra hai
-// ca, vì hai ca là trả tiền hai lần.
-func TestDuplicateSessionPerRoomPerDayBlocked(t *testing.T) {
+func TestReportScopedByRole(t *testing.T) {
 	e := newHKTestEnv(t)
+	sess := e.createSession(today())
+	e.do("POST", "/api/hk/sessions/assign", e.adminToken, map[string]string{
+		"id": sess.ID, "staff_id": e.lanID,
+	})
+	e.fillAllRequired(sess.ID, e.lanToken)
+
 	day := today()
-	e.createSession(day)
-	w := e.do("POST", "/api/hk/sessions/create", e.adminToken, map[string]interface{}{
-		"room_id": e.roomID, "day": day,
-	})
-	if w.Code != http.StatusConflict {
-		t.Fatalf("muốn 409 được %d: %s", w.Code, w.Body.String())
-	}
-}
-
-// ─── Phụ cấp ──────────────────────────────────────────────────────────────
-
-func TestAllowanceNeedsApprovalBeforeCounting(t *testing.T) {
-	e := newHKTestEnv(t)
-	sess := e.createSession(today())
-	e.do("POST", "/api/hk/sessions/assign", e.adminToken, map[string]string{
-		"id": sess.ID, "staff_id": e.lanID,
-	})
-	e.fillAllRequired(sess.ID, e.lanToken)
-
-	w := e.do("POST", "/api/hk/allowances", e.lanToken, map[string]interface{}{
-		"session_id": sess.ID, "type": "bed_linen", "amount": 30000, "note": "Chăn bẩn",
-	})
-	if w.Code != 200 {
-		t.Fatalf("đề nghị phụ cấp hỏng: %s", w.Body.String())
-	}
-	var out struct {
-		Session HKSessionView `json:"session"`
-	}
-	e.decode(w, &out)
-	if out.Session.Pay.Total != 100000 || out.Session.Pay.AllowancePending != 30000 {
-		t.Fatalf("phụ cấp chờ duyệt chưa được cộng vào tổng: %+v", out.Session.Pay)
-	}
-
-	alID := out.Session.Allowances[0].ID
-	w = e.do("POST", "/api/hk/allowances/review", e.adminToken, map[string]interface{}{
-		"id": alID, "status": HKAllowanceApproved,
-	})
-	e.decode(w, &out)
-	if out.Session.Pay.Total != 130000 {
-		t.Fatalf("sau khi duyệt phải cộng: %+v", out.Session.Pay)
-	}
-}
-
-func TestCleanerCannotApproveOwnAllowance(t *testing.T) {
-	e := newHKTestEnv(t)
-	sess := e.createSession(today())
-	e.do("POST", "/api/hk/sessions/assign", e.adminToken, map[string]string{
-		"id": sess.ID, "staff_id": e.lanID,
-	})
-	w := e.do("POST", "/api/hk/allowances", e.lanToken, map[string]interface{}{
-		"session_id": sess.ID, "type": "bed_linen", "amount": 30000,
-	})
-	var out struct {
-		Session HKSessionView `json:"session"`
-	}
-	e.decode(w, &out)
-	alID := out.Session.Allowances[0].ID
-
-	if w := e.do("POST", "/api/hk/allowances/review", e.lanToken, map[string]interface{}{
-		"id": alID, "status": HKAllowanceApproved,
-	}); w.Code != http.StatusForbidden {
-		t.Fatalf("cô không được tự duyệt tiền của mình, muốn 403 được %d", w.Code)
-	}
-}
-
-func TestAllowanceRejectsBadInput(t *testing.T) {
-	e := newHKTestEnv(t)
-	sess := e.createSession(today())
-	e.do("POST", "/api/hk/sessions/assign", e.adminToken, map[string]string{
-		"id": sess.ID, "staff_id": e.lanID,
-	})
-	bad := []map[string]interface{}{
-		{"session_id": sess.ID, "type": "khong_ton_tai", "amount": 30000},
-		{"session_id": sess.ID, "type": "bed_linen", "amount": 0},
-		{"session_id": sess.ID, "type": "bed_linen", "amount": -5000},
-	}
-	for _, b := range bad {
-		if w := e.do("POST", "/api/hk/allowances", e.lanToken, b); w.Code != http.StatusBadRequest {
-			t.Errorf("%v: muốn 400 được %d", b, w.Code)
-		}
-	}
-}
-
-// ─── Bảng công ────────────────────────────────────────────────────────────
-
-func TestTimesheetScopedByRole(t *testing.T) {
-	e := newHKTestEnv(t)
-	sess := e.createSession(today())
-	e.do("POST", "/api/hk/sessions/assign", e.adminToken, map[string]string{
-		"id": sess.ID, "staff_id": e.lanID,
-	})
-	e.fillAllRequired(sess.ID, e.lanToken)
-
-	month := time.Now().Format("2006-01")
 
 	var adminOut struct {
-		Rows []HKTimesheetRow `json:"rows"`
+		Rows  []HKPerfRow `json:"rows"`
+		Total HKPerfRow   `json:"total"`
 	}
-	e.decode(e.do("GET", "/api/hk/timesheet?month="+month, e.adminToken, nil), &adminOut)
-	if len(adminOut.Rows) != 1 || adminOut.Rows[0].Total != 100000 {
-		t.Fatalf("quản lý phải thấy bảng công: %+v", adminOut.Rows)
+	e.decode(e.do("GET", "/api/hk/report?day="+day, e.adminToken, nil), &adminOut)
+	if len(adminOut.Rows) != 1 || adminOut.Rows[0].Sessions != 1 {
+		t.Fatalf("quản lý phải thấy báo cáo: %+v", adminOut.Rows)
+	}
+	if adminOut.Total.Rooms != 1 {
+		t.Fatalf("tổng số phòng sai: %+v", adminOut.Total)
 	}
 
-	// Hoa chưa làm ca nào → bảng công của Hoa phải rỗng, không thấy tiền của Lan.
+	// Hoa chưa làm ca nào → báo cáo của Hoa rỗng, không thấy số liệu của Lan.
 	var hoaOut struct {
-		Rows []HKTimesheetRow `json:"rows"`
+		Rows []HKPerfRow `json:"rows"`
 	}
-	e.decode(e.do("GET", "/api/hk/timesheet?month="+month, e.hoaToken, nil), &hoaOut)
+	e.decode(e.do("GET", "/api/hk/report?day="+day, e.hoaToken, nil), &hoaOut)
 	if len(hoaOut.Rows) != 0 {
-		t.Fatalf("Hoa không được thấy công của người khác: %+v", hoaOut.Rows)
+		t.Fatalf("Hoa không được thấy số liệu người khác: %+v", hoaOut.Rows)
 	}
 }
-
-func TestTimesheetCSVAdminOnly(t *testing.T) {
-	e := newHKTestEnv(t)
-	if w := e.do("GET", "/api/hk/timesheet.csv", e.lanToken, nil); w.Code != http.StatusForbidden {
-		t.Fatalf("CSV chỉ cho quản lý, muốn 403 được %d", w.Code)
-	}
-	w := e.do("GET", "/api/hk/timesheet.csv", e.adminToken, nil)
-	if w.Code != 200 {
-		t.Fatalf("muốn 200 được %d", w.Code)
-	}
-	// BOM để Excel trên Windows đọc đúng tiếng Việt.
-	if !bytes.HasPrefix(w.Body.Bytes(), []byte{0xEF, 0xBB, 0xBF}) {
-		t.Fatal("CSV thiếu BOM — Excel sẽ hiện tiếng Việt thành ký tự lạ")
-	}
-}
-
-// ─── Ảnh ──────────────────────────────────────────────────────────────────
-
 func TestPhotoRequiresLogin(t *testing.T) {
 	e := newHKTestEnv(t)
 	url := e.uploadPhoto(e.lanToken)
@@ -677,7 +587,7 @@ func TestDataSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mở lần 1: %v", err)
 	}
-	app.store.UpsertRoom(HKRoom{ID: "r1", Name: "Phòng A", BaseFee: 90000, Active: true})
+	app.store.UpsertRoom(HKRoom{ID: "r1", Name: "Phòng A", Active: true})
 	app.store.Close()
 
 	// Khởi động lại: dữ liệu phải còn, và KHÔNG được tạo thêm admin thứ hai.
@@ -704,19 +614,19 @@ func TestDataSurvivesRestart(t *testing.T) {
 func TestRoomSyncKeepsManualSettings(t *testing.T) {
 	e := newHKTestEnv(t)
 	e.do("POST", "/api/hk/rooms/settings", e.adminToken, map[string]interface{}{
-		"id": e.roomID, "template_id": "hkt_2pn", "door_note": "Mã cổng 8899", "base_fee": 175000,
+		"id": e.roomID, "template_id": "hkt_2pn", "door_note": "Mã cổng 8899",
 	})
 	// Giả lập một lượt đồng bộ ghi đè các trường lấy từ API.
 	e.app.store.UpsertRoom(HKRoom{
 		ID: e.roomID, ListingID: e.roomID, Name: "Tên mới từ Dayladau",
 		Zone: "Cầu Giấy", RoomType: "one_bedroom", Active: true, SyncedAt: hkNowMs(),
-		TemplateID: "hkt_studio", DoorNote: "", BaseFee: 100000,
+		TemplateID: "hkt_studio", DoorNote: "",
 	})
 	room, _ := e.app.store.RoomByID(e.roomID)
 	if room.Name != "Tên mới từ Dayladau" {
 		t.Fatalf("trường từ API phải được cập nhật: %q", room.Name)
 	}
-	if room.TemplateID != "hkt_2pn" || room.DoorNote != "Mã cổng 8899" || room.BaseFee != 175000 {
+	if room.TemplateID != "hkt_2pn" || room.DoorNote != "Mã cổng 8899" {
 		t.Fatalf("cài đặt tay bị đồng bộ ghi đè mất: %+v", room)
 	}
 }

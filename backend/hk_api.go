@@ -86,7 +86,7 @@ type HKSessionView struct {
 	Room      HKRoom     `json:"room"`
 	StaffName string     `json:"staff_name"`
 	Progress  HKProgress `json:"progress"`
-	Pay       HKPay      `json:"pay"`
+	Minutes   int        `json:"minutes"` // thời gian dọn, phút
 	Late      bool       `json:"late"`
 }
 
@@ -137,7 +137,7 @@ func (a *HKApp) hkBuildViews(sessions []HKSession) ([]HKSessionView, error) {
 			Room:      roomByID[s.RoomID],
 			StaffName: userByID[s.StaffID].Name,
 			Progress:  hkSessionProgress(&s, tpl),
-			Pay:       hkComputePay(&s),
+			Minutes:   hkSessionMinutes(&s),
 		}
 		// Chỉ gắn cờ trễ khi ca CHƯA đủ ảnh: nộp lúc 14:05 cho hạn 14:00 mà đã xong
 		// việc thì không có gì để hối, cờ đỏ ở đó chỉ làm nhiễu bảng điều phối.
@@ -283,11 +283,7 @@ func (a *HKApp) handleMeta(w http.ResponseWriter, r *http.Request) {
 			zones = append(zones, rm.Zone)
 		}
 	}
-	hkWriteJSON(w, http.StatusOK, map[string]interface{}{
-		"room_types":      hkRoomTypes,
-		"allowance_types": hkAllowanceTypes,
-		"zones":           zones,
-	})
+	hkWriteJSON(w, http.StatusOK, map[string]interface{}{"zones": zones})
 }
 
 // ─── Người dùng (quản lý) ─────────────────────────────────────────────────
@@ -394,17 +390,12 @@ func (a *HKApp) handleRoomSettings(w http.ResponseWriter, r *http.Request) {
 		ID         string `json:"id"`
 		TemplateID string `json:"template_id"`
 		DoorNote   string `json:"door_note"`
-		BaseFee    int64  `json:"base_fee"`
 	}
 	if err := hkDecodeBody(r, &body); err != nil {
 		hkFail(w, http.StatusBadRequest, "Dữ liệu gửi lên không đọc được.")
 		return
 	}
-	if body.BaseFee < 0 {
-		hkFail(w, http.StatusBadRequest, "Đơn giá không được âm.")
-		return
-	}
-	if err := a.store.UpdateRoomSettings(body.ID, body.TemplateID, body.DoorNote, body.BaseFee); err != nil {
+	if err := a.store.UpdateRoomSettings(body.ID, body.TemplateID, body.DoorNote); err != nil {
 		hkFail(w, http.StatusInternalServerError, "Không lưu được thay đổi.")
 		return
 	}
@@ -742,10 +733,9 @@ func (a *HKApp) handleSessionReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		ID        string `json:"id"`
-		Status    string `json:"status"`
-		Deduction int64  `json:"deduction"`
-		Note      string `json:"note"`
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Note   string `json:"note"`
 	}
 	if err := hkDecodeBody(r, &body); err != nil {
 		hkFail(w, http.StatusBadRequest, "Dữ liệu gửi lên không đọc được.")
@@ -760,16 +750,7 @@ func (a *HKApp) handleSessionReview(w http.ResponseWriter, r *http.Request) {
 		hkFail(w, http.StatusNotFound, "Không tìm thấy ca dọn này.")
 		return
 	}
-	if body.Deduction < 0 {
-		hkFail(w, http.StatusBadRequest, "Số tiền trừ không được âm.")
-		return
-	}
-	// Từ chối thì không trừ thêm: đã không trả tiền rồi, trừ nữa là tính hai lần.
-	if body.Status == HKSessionRejected {
-		body.Deduction = 0
-	}
 	sess.Status = body.Status
-	sess.Deduction = body.Deduction
 	sess.ReviewNote = strings.TrimSpace(body.Note)
 	sess.ReviewedAt = hkNowMs()
 	sess.ReviewedBy = admin.Name
@@ -780,174 +761,62 @@ func (a *HKApp) handleSessionReview(w http.ResponseWriter, r *http.Request) {
 	a.writeSessionView(w, sess)
 }
 
-// handleSessionCreate cho quản lý thêm ca tay.
+// handleSessionsSync — quản lý bấm "Đồng bộ lịch": đọc iCal của mọi phòng và
+// tạo ca cho các lượt khách sắp trả phòng.
+func (a *HKApp) handleSessionsSync(w http.ResponseWriter, r *http.Request) {
+	if !hkRequirePost(w, r) {
+		return
+	}
+	if _, err := a.hkRequireAdmin(r); err != nil {
+		hkFailAuth(w, err)
+		return
+	}
+	var body struct {
+		Ahead int `json:"ahead"`
+	}
+	hkDecodeBody(r, &body)
+
+	created, skipped, err := a.hkSyncSessions(body.Ahead)
+	if err != nil {
+		hkFail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	hkWriteJSON(w, http.StatusOK, map[string]interface{}{
+		"created": created, "skipped": skipped, "synced_at": hkNowMs(),
+	})
+}
+
+// ─── Báo cáo hiệu suất ────────────────────────────────────────────────────
 //
-// Cần thiết vì lịch check-out tự động chưa đấu được API (xem hk_sync.go): không
-// có đường này thì module đứng im chờ backend khác.
-func (a *HKApp) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
-	if !hkRequirePost(w, r) {
-		return
-	}
-	if _, err := a.hkRequireAdmin(r); err != nil {
-		hkFailAuth(w, err)
-		return
-	}
-	var body struct {
-		RoomID        string `json:"room_id"`
-		Day           string `json:"day"`
-		CheckoutAt    int64  `json:"checkout_at"`
-		NextCheckinAt int64  `json:"next_checkin_at"`
-		GuestNote     string `json:"guest_note"`
-	}
-	if err := hkDecodeBody(r, &body); err != nil {
-		hkFail(w, http.StatusBadRequest, "Dữ liệu gửi lên không đọc được.")
-		return
-	}
-	if strings.TrimSpace(body.Day) == "" {
-		body.Day = time.Now().Format("2006-01-02")
-	}
-	sess, created, err := a.hkCreateSession(body.RoomID, body.Day, body.CheckoutAt, body.NextCheckinAt, body.GuestNote)
-	if err != nil {
-		hkFail(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if !created {
-		hkFail(w, http.StatusConflict, "Phòng này đã có ca dọn trong ngày đó rồi.")
-		return
-	}
-	a.writeSessionView(w, sess)
-}
+// Phần mềm này KHÔNG tính lương — lương tính theo cơ chế riêng ở ngoài. Ở đây chỉ
+// đo việc đã làm: bao nhiêu ca, bao nhiêu phòng, dọn trung bình bao lâu.
 
-// ─── Phụ cấp ──────────────────────────────────────────────────────────────
-
-func (a *HKApp) handleAllowanceCreate(w http.ResponseWriter, r *http.Request) {
-	if !hkRequirePost(w, r) {
-		return
-	}
-	var body struct {
-		SessionID string    `json:"session_id"`
-		Type      string    `json:"type"`
-		Amount    int64     `json:"amount"`
-		Note      string    `json:"note"`
-		Photos    []HKPhoto `json:"photos"`
-	}
-	if err := hkDecodeBody(r, &body); err != nil {
-		hkFail(w, http.StatusBadRequest, "Dữ liệu gửi lên không đọc được.")
-		return
-	}
-	_, sess, ok := a.hkLoadSessionFor(w, r, body.SessionID)
-	if !ok {
-		return
-	}
-	if sess.Status == HKSessionApproved {
-		hkFail(w, http.StatusConflict, "Ca này đã chốt công, không thêm phụ cấp được nữa.")
-		return
-	}
-	if !hkValidAllowanceType(body.Type) {
-		hkFail(w, http.StatusBadRequest, "Loại phụ cấp không hợp lệ.")
-		return
-	}
-	if body.Amount <= 0 {
-		hkFail(w, http.StatusBadRequest, "Số tiền đề nghị phải lớn hơn 0.")
-		return
-	}
-	photos := []HKPhoto{}
-	for _, p := range body.Photos {
-		if strings.HasPrefix(p.URL, "/api/hk/photo/") {
-			photos = append(photos, p)
-		}
-	}
-	al := HKAllowance{
-		ID:        hkRandomID("hkal"),
-		SessionID: sess.ID,
-		Type:      body.Type,
-		Amount:    body.Amount,
-		Note:      strings.TrimSpace(body.Note),
-		Photos:    photos,
-		Status:    HKAllowancePending,
-		CreatedAt: hkNowMs(),
-	}
-	if err := a.store.InsertAllowance(al); err != nil {
-		hkFail(w, http.StatusInternalServerError, "Không lưu được đề nghị.")
-		return
-	}
-	updated, _ := a.store.SessionByID(sess.ID)
-	a.writeSessionView(w, updated)
-}
-
-func (a *HKApp) handleAllowanceReview(w http.ResponseWriter, r *http.Request) {
-	if !hkRequirePost(w, r) {
-		return
-	}
-	if _, err := a.hkRequireAdmin(r); err != nil {
-		hkFailAuth(w, err)
-		return
-	}
-	var body struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-		Amount *int64 `json:"amount"`
-	}
-	if err := hkDecodeBody(r, &body); err != nil {
-		hkFail(w, http.StatusBadRequest, "Dữ liệu gửi lên không đọc được.")
-		return
-	}
-	if body.Status != HKAllowanceApproved && body.Status != HKAllowanceRejected {
-		hkFail(w, http.StatusBadRequest, "Chỉ duyệt hoặc không duyệt được.")
-		return
-	}
-	al, err := a.store.AllowanceByID(body.ID)
-	if err != nil {
-		hkFail(w, http.StatusNotFound, "Không tìm thấy khoản phụ cấp.")
-		return
-	}
-	amount := al.Amount
-	setAmount := false
-	if body.Amount != nil {
-		if *body.Amount < 0 {
-			hkFail(w, http.StatusBadRequest, "Số tiền không được âm.")
-			return
-		}
-		amount = *body.Amount
-		setAmount = true
-	}
-	if err := a.store.ReviewAllowance(body.ID, body.Status, amount, setAmount); err != nil {
-		hkFail(w, http.StatusInternalServerError, "Không lưu được.")
-		return
-	}
-	updated, _ := a.store.SessionByID(al.SessionID)
-	a.writeSessionView(w, updated)
-}
-
-// ─── Bảng công ────────────────────────────────────────────────────────────
-
-func (a *HKApp) handleTimesheet(w http.ResponseWriter, r *http.Request) {
+func (a *HKApp) handleReport(w http.ResponseWriter, r *http.Request) {
 	u, err := a.hkAuthUser(r)
 	if err != nil {
 		hkFailAuth(w, err)
 		return
 	}
-	month := strings.TrimSpace(r.URL.Query().Get("month")) // YYYY-MM
-	if month == "" {
-		month = time.Now().Format("2006-01")
-	}
-	start, err := time.ParseInLocation("2006-01", month, time.Now().Location())
+	loc := time.Now().Location()
+	q := r.URL.Query()
+
+	// Mặc định xem theo NGÀY chứ không phải tháng: câu hỏi thường trực của quản lý
+	// là "hôm nay chạy thế nào", không phải "tháng này tổng bao nhiêu".
+	from, to, label, err := hkReportRange(q.Get("day"), q.Get("month"), loc)
 	if err != nil {
-		hkFail(w, http.StatusBadRequest, "Tháng không hợp lệ. Dạng đúng: 2026-08")
+		hkFail(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	end := start.AddDate(0, 1, 0).Add(-time.Millisecond)
 
-	f := HKSessionFilter{From: start.UnixMilli(), To: end.UnixMilli()}
+	f := HKSessionFilter{From: from.UnixMilli(), To: to.UnixMilli()}
 	if u.Role != HKRoleAdmin {
 		f.StaffID = u.ID
 	}
 	sessions, err := a.store.ListSessions(f)
 	if err != nil {
-		hkFail(w, http.StatusInternalServerError, "Không đọc được bảng công.")
+		hkFail(w, http.StatusInternalServerError, "Không đọc được dữ liệu ca.")
 		return
 	}
-	// Suy lại trạng thái trước khi cộng tiền — cùng lý do như hkBuildViews.
 	for i := range sessions {
 		sessions[i].Status = hkDeriveStatus(&sessions[i], a.hkTemplateOf(&sessions[i]))
 	}
@@ -962,17 +831,68 @@ func (a *HKApp) handleTimesheet(w http.ResponseWriter, r *http.Request) {
 		userByID[x.ID] = x
 	}
 
-	rows := hkBuildTimesheet(sessions, userByID)
+	progressOf := func(s *HKSession) HKProgress {
+		return hkSessionProgress(s, a.hkTemplateOf(s))
+	}
+	rows := hkBuildPerf(sessions, userByID, progressOf)
+
+	total := HKPerfRow{Name: "Tổng"}
+	roomSet := map[string]bool{}
+	minuteSum, minuteN := 0, 0
+	for i := range sessions {
+		s := &sessions[i]
+		if m := hkSessionMinutes(s); m > 0 && (s.Status == HKSessionApproved || s.Status == HKSessionSubmitted) {
+			minuteSum += m
+			minuteN++
+		}
+	}
+	for _, x := range rows {
+		total.Sessions += x.Sessions
+		total.Approved += x.Approved
+		total.Pending += x.Pending
+		total.Rejected += x.Rejected
+		total.Late += x.Late
+		total.Photos += x.Photos
+	}
+	for i := range sessions {
+		if sessions[i].Status == HKSessionApproved || sessions[i].Status == HKSessionSubmitted {
+			roomSet[sessions[i].RoomID] = true
+		}
+	}
+	total.Rooms = len(roomSet)
+	if minuteN > 0 {
+		total.AvgMinute = minuteSum / minuteN
+	}
+
 	views, err := a.hkBuildViews(sessions)
 	if err != nil {
-		hkFail(w, http.StatusInternalServerError, "Không dựng được bảng công.")
+		hkFail(w, http.StatusInternalServerError, "Không dựng được báo cáo.")
 		return
 	}
 	hkWriteJSON(w, http.StatusOK, map[string]interface{}{
-		"month":    month,
-		"rows":     rows,
-		"sessions": views,
+		"label": label, "rows": rows, "total": total, "sessions": views,
 	})
+}
+
+// hkReportRange nhận `day` (YYYY-MM-DD) hoặc `month` (YYYY-MM); không có thì lấy
+// hôm nay.
+func hkReportRange(day, month string, loc *time.Location) (time.Time, time.Time, string, error) {
+	day, month = strings.TrimSpace(day), strings.TrimSpace(month)
+	if month != "" {
+		start, err := time.ParseInLocation("2006-01", month, loc)
+		if err != nil {
+			return time.Time{}, time.Time{}, "", fmt.Errorf("Tháng không hợp lệ. Dạng đúng: 2026-08")
+		}
+		return start, start.AddDate(0, 1, 0).Add(-time.Millisecond), month, nil
+	}
+	if day == "" {
+		day = time.Now().In(loc).Format("2006-01-02")
+	}
+	start, err := time.ParseInLocation("2006-01-02", day, loc)
+	if err != nil {
+		return time.Time{}, time.Time{}, "", fmt.Errorf("Ngày không hợp lệ. Dạng đúng: 2026-08-14")
+	}
+	return start, start.AddDate(0, 0, 1).Add(-time.Millisecond), day, nil
 }
 
 // ─── Ảnh ──────────────────────────────────────────────────────────────────
@@ -982,60 +902,6 @@ var hkPhotoExts = map[string]string{
 	"image/png":  ".png",
 	"image/webp": ".webp",
 	"image/heic": ".heic",
-}
-
-// handleTimesheetCSV: cùng số liệu với bảng trên màn, xuất cho kế toán.
-func (a *HKApp) handleTimesheetCSV(w http.ResponseWriter, r *http.Request) {
-	u, err := a.hkRequireAdmin(r)
-	if err != nil {
-		hkFailAuth(w, err)
-		return
-	}
-	_ = u
-	month := strings.TrimSpace(r.URL.Query().Get("month"))
-	if month == "" {
-		month = time.Now().Format("2006-01")
-	}
-	start, err := time.ParseInLocation("2006-01", month, time.Now().Location())
-	if err != nil {
-		hkFail(w, http.StatusBadRequest, "Tháng không hợp lệ.")
-		return
-	}
-	end := start.AddDate(0, 1, 0).Add(-time.Millisecond)
-	sessions, err := a.store.ListSessions(HKSessionFilter{From: start.UnixMilli(), To: end.UnixMilli()})
-	if err != nil {
-		hkFail(w, http.StatusInternalServerError, "Không đọc được bảng công.")
-		return
-	}
-	for i := range sessions {
-		sessions[i].Status = hkDeriveStatus(&sessions[i], a.hkTemplateOf(&sessions[i]))
-	}
-	users, _ := a.store.ListUsers("")
-	userByID := map[string]HKUser{}
-	for _, x := range users {
-		userByID[x.ID] = x
-	}
-	rows := hkBuildTimesheet(sessions, userByID)
-
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="bang-cong-don-dep-%s.csv"`, month))
-	// BOM để Excel trên Windows đọc đúng tiếng Việt — thiếu nó là bảng công mở ra
-	// đầy ký tự lạ và kế toán gọi điện.
-	w.Write([]byte{0xEF, 0xBB, 0xBF})
-	fmt.Fprintln(w, "Cô dọn dẹp,Số điện thoại,Tài khoản,Số phòng,Phòng đã duyệt,Phòng chờ đối soát,Tiền khoán,Trừ,Phụ cấp đã duyệt,Phụ cấp chờ duyệt,Tổng phải trả")
-	for _, x := range rows {
-		fmt.Fprintf(w, "%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d\n",
-			csvCell(x.Name), csvCell(x.Phone), csvCell(x.Bank),
-			x.Rooms, x.RoomsConfirmed, x.RoomsPending,
-			x.Base, x.Deduction, x.Allowance, x.AllowancePending, x.Total)
-	}
-}
-
-func csvCell(s string) string {
-	if strings.ContainsAny(s, ",\"\n") {
-		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-	}
-	return s
 }
 
 // handlePhotoUpload nhận ảnh checklist.
@@ -1141,18 +1007,15 @@ func (a *HKApp) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("/api/hk/sessions", a.handleSessions)
 	mux.HandleFunc("/api/hk/sessions/get", a.handleSessionGet)
-	mux.HandleFunc("/api/hk/sessions/create", a.handleSessionCreate)
+	mux.HandleFunc("/api/hk/sessions/sync", a.handleSessionsSync)
 	mux.HandleFunc("/api/hk/sessions/start", a.handleSessionStart)
 	mux.HandleFunc("/api/hk/sessions/item", a.handleSessionItem)
 	mux.HandleFunc("/api/hk/sessions/submit", a.handleSessionSubmit)
 	mux.HandleFunc("/api/hk/sessions/assign", a.handleSessionAssign)
 	mux.HandleFunc("/api/hk/sessions/review", a.handleSessionReview)
 
-	mux.HandleFunc("/api/hk/allowances", a.handleAllowanceCreate)
-	mux.HandleFunc("/api/hk/allowances/review", a.handleAllowanceReview)
-
-	mux.HandleFunc("/api/hk/timesheet", a.handleTimesheet)
-	mux.HandleFunc("/api/hk/timesheet.csv", a.handleTimesheetCSV)
+	mux.HandleFunc("/api/hk/report", a.handleReport)
+	mux.HandleFunc("/api/hk/reviews", a.handleReviews)
 
 	mux.HandleFunc("/api/hk/photos", a.handlePhotoUpload)
 	mux.HandleFunc("/api/hk/photo/", a.handlePhotoServe)

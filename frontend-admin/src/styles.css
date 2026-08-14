@@ -1471,3 +1471,61 @@ tbody tr:last-child td {
 		border-right: 1px solid var(--border);
 	}
 }
+
+/* ─── Đánh giá của khách ──────────────────────────────────────────────── */
+
+.rv {
+	border-left: 3px solid var(--border);
+	padding: 10px 0 10px 12px;
+	margin-bottom: 10px;
+	background: var(--card);
+	border-radius: 0 10px 10px 0;
+}
+.rv:last-child {
+	margin-bottom: 0;
+}
+/* Chê chuyện sạch sẽ tô đỏ, khen tô xanh: quản lý lướt qua là thấy ngay chỗ
+   cần xử lý, không phải đọc từng dòng. */
+.rv--bad {
+	border-left-color: var(--danger);
+	background: var(--danger-bg);
+}
+.rv--good {
+	border-left-color: var(--ok);
+}
+.rv-top {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	font-size: 12.5px;
+	color: var(--muted);
+}
+.rv-room {
+	font-weight: 600;
+	color: var(--text);
+}
+.rv-date {
+	margin-left: auto;
+	font-variant-numeric: tabular-nums;
+}
+.rv-text {
+	margin-top: 5px;
+	font-size: 14px;
+	line-height: 1.45;
+	color: var(--text);
+}
+
+.mob-h2 {
+	font-size: 15px;
+	font-weight: 700;
+	margin: 6px 0 0;
+}
+
+/* Ba ô số liệu trên màn điện thoại — chữ nhỏ hơn để không tràn dòng. */
+.mob-sum--3 > div strong {
+	font-size: 19px;
+}
+.mob-sum--3 > div span {
+	font-size: 11.5px;
+}

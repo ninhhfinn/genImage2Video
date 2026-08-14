@@ -5,25 +5,14 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { api, photoSrc } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import { Link, useRouter } from '../router.jsx'
-import { Alert, AllowanceBadge, Empty, Progress, SessionBadge, Spinner, StaffBadge, Stat } from '../components/ui.jsx'
-import {
-	ALLOWANCE_LABEL,
-	ROOM_TYPE_LABEL,
-	dayKey,
-	dayLabel,
-	dayMonth,
-	hour,
-	money,
-	monthKey,
-	monthLabel,
-	shiftDay,
-	shiftMonth,
-} from '../format.js'
+import { Alert, Empty, Progress, SessionBadge, Spinner, StaffBadge, Stat } from '../components/ui.jsx'
+import { ROOM_TYPE_LABEL, dayKey, dayLabel, dayMonth, hour, minutes, shiftDay } from '../format.js'
 
 const TABS = [
 	{ key: 'board', label: 'Ca dọn', icon: '📋', to: '/' },
-	{ key: 'review', label: 'Đối soát công', icon: '✅', to: '/review' },
-	{ key: 'timesheet', label: 'Bảng công', icon: '💵', to: '/timesheet' },
+	{ key: 'review', label: 'Duyệt ảnh', icon: '✅', to: '/review' },
+	{ key: 'report', label: 'Báo cáo', icon: '📊', to: '/report' },
+	{ key: 'reviews', label: 'Đánh giá khách', icon: '⭐', to: '/reviews' },
 	{ key: 'staff', label: 'Cô dọn dẹp', icon: '👥', to: '/staff' },
 	{ key: 'rooms', label: 'Phòng', icon: '🏠', to: '/rooms' },
 	{ key: 'checklist', label: 'Mẫu checklist', icon: '📝', to: '/checklists' },
@@ -87,7 +76,8 @@ export function BoardPage() {
 	const [staffs, setStaffs] = useState([])
 	const [rooms, setRooms] = useState([])
 	const [err, setErr] = useState('')
-	const [adding, setAdding] = useState(false)
+	const [syncing, setSyncing] = useState(false)
+	const [msg, setMsg] = useState('')
 
 	async function load(d) {
 		setSessions(null)
@@ -113,6 +103,21 @@ export function BoardPage() {
 	const waiting = rows.filter((s) => s.status === 'submitted').length
 	const doing = rows.filter((s) => s.status === 'in_progress').length
 
+	async function syncSchedule() {
+		setSyncing(true)
+		setErr('')
+		setMsg('')
+		try {
+			const d = await api.syncSessions(14)
+			setMsg(`Đồng bộ xong: thêm ${d.created} ca mới, ${d.skipped} ca đã có sẵn.`)
+			await load(day)
+		} catch (e) {
+			setErr(e.message)
+		} finally {
+			setSyncing(false)
+		}
+	}
+
 	async function assign(id, staffId) {
 		try {
 			const d = await api.assignSession(id, staffId)
@@ -128,8 +133,8 @@ export function BoardPage() {
 				<div>
 					<h1>Ca dọn {dayLabel(day, today).toLowerCase()}</h1>
 					<p className="sub">
-						Ca sinh từ lịch trả phòng. Lịch tự động chưa đấu được API đặt phòng của host — hiện thêm ca bằng nút bên
-						phải.
+						Ca sinh tự động từ lịch đặt phòng của Dayladau. Mỗi lượt khách trả phòng là một ca dọn kỹ — phòng cho
+						thuê theo giờ có thể nhiều ca trong ngày.
 					</p>
 				</div>
 				<div className="row-actions">
@@ -138,7 +143,9 @@ export function BoardPage() {
 						{dayLabel(day, today)}
 					</button>
 					<button className="btn btn--ghost" onClick={() => setDay(shiftDay(day, 1))}>›</button>
-					<button className="btn btn--primary" onClick={() => setAdding(true)}>+ Thêm ca</button>
+					<button className="btn btn--primary" disabled={syncing} onClick={syncSchedule}>
+						{syncing ? 'Đang đồng bộ…' : 'Đồng bộ lịch'}
+					</button>
 				</div>
 			</div>
 
@@ -153,11 +160,12 @@ export function BoardPage() {
 			</div>
 
 			<Alert>{err}</Alert>
+			{msg && <Alert tone="ok">{msg}</Alert>}
 
 			{sessions === null ? (
 				<Spinner />
 			) : !rows.length ? (
-				<Empty icon="📅">Ngày này chưa có ca dọn nào. Bấm “Thêm ca” để tạo.</Empty>
+				<Empty icon="📅">Ngày này chưa có ca dọn nào. Bấm “Đồng bộ lịch” để kéo từ Dayladau.</Empty>
 			) : (
 				<div className="card table-wrap">
 					<table>
@@ -221,71 +229,11 @@ export function BoardPage() {
 				</div>
 			)}
 
-			{adding && (
-				<AddSessionModal
-					rooms={rooms}
-					day={day}
-					onClose={() => setAdding(false)}
-					onSaved={() => {
-						setAdding(false)
-						load(day)
-					}}
-				/>
-			)}
 		</AdminShell>
 	)
 }
 
-function AddSessionModal({ rooms, day, onClose, onSaved }) {
-	const [roomId, setRoomId] = useState(rooms[0]?.id || '')
-	const [note, setNote] = useState('')
-	const [err, setErr] = useState('')
-	const [busy, setBusy] = useState(false)
-
-	async function submit() {
-		setBusy(true)
-		setErr('')
-		try {
-			await api.createSession({ room_id: roomId, day, guest_note: note })
-			onSaved()
-		} catch (e) {
-			setErr(e.message)
-		} finally {
-			setBusy(false)
-		}
-	}
-
-	return (
-		<div className="modal" onClick={onClose}>
-			<div className="modal-in" onClick={(e) => e.stopPropagation()}>
-				<h2>Thêm ca dọn — {dayLabel(day)}</h2>
-				<label className="field">
-					<span>Phòng</span>
-					<select value={roomId} onChange={(e) => setRoomId(e.target.value)}>
-						{rooms.map((r) => (
-							<option key={r.id} value={r.id}>
-								{r.name} ({r.code})
-							</option>
-						))}
-					</select>
-				</label>
-				<label className="field">
-					<span>Ghi chú từ khách (không bắt buộc)</span>
-					<input value={note} onChange={(e) => setNote(e.target.value)} placeholder="VD: khách báo vỡ 1 cốc" />
-				</label>
-				<Alert>{err}</Alert>
-				<div className="modal-actions">
-					<button className="btn btn--ghost" onClick={onClose}>Huỷ</button>
-					<button className="btn btn--primary" disabled={busy || !roomId} onClick={submit}>
-						{busy ? 'Đang tạo…' : 'Tạo ca'}
-					</button>
-				</div>
-			</div>
-		</div>
-	)
-}
-
-// ─── Đối soát công ────────────────────────────────────────────────────────
+// ─── Duyệt ảnh ────────────────────────────────────────────────────────
 
 export function ReviewPage() {
 	const { navigate } = useRouter()
@@ -310,12 +258,12 @@ export function ReviewPage() {
 	}, [])
 
 	const rows = sessions || []
-	const totalMoney = rows.reduce((s, x) => s + (x.pay?.total || 0), 0)
-	const withAllowance = rows.filter((s) => (s.allowances || []).some((a) => a.status === 'pending')).length
+	const late = rows.filter((s) => s.deadline_at && s.submitted_at > s.deadline_at).length
+	const photos = rows.reduce((n, x) => n + (x.progress?.photo_count || 0), 0)
 
 	async function approve(id) {
 		try {
-			await api.reviewSession({ id, status: 'approved', deduction: 0 })
+			await api.reviewSession({ id, status: 'approved' })
 			setSessions((list) => list.filter((s) => s.id !== id))
 		} catch (e) {
 			setErr(e.message)
@@ -326,16 +274,16 @@ export function ReviewPage() {
 		<AdminShell active="review">
 			<div className="page-head">
 				<div>
-					<h1>Đối soát công</h1>
-					<p className="sub">Ca đủ ảnh đã được ghi công tạm tính. Duyệt để chốt, hoặc mở ra xem ảnh rồi trừ/từ chối.</p>
+					<h1>Duyệt ảnh</h1>
+					<p className="sub">Ca đã đủ ảnh, chờ bạn xem qua rồi duyệt — hoặc mở ra xem kỹ và trả lại kèm lý do.</p>
 				</div>
 				<button className="btn btn--ghost" onClick={load}>Tải lại</button>
 			</div>
 
 			<div className="stats">
 				<Stat label="Ca chờ duyệt" value={rows.length} tone={rows.length ? 'warn' : 'ok'} />
-				<Stat label="Tiền đang treo" value={money(totalMoney)} sub="Tạm tính, chưa chốt" />
-				<Stat label="Có phụ cấp chờ duyệt" value={withAllowance} tone={withAllowance ? 'warn' : undefined} />
+				<Stat label="Ảnh cần xem" value={photos} />
+				<Stat label="Xong sau giờ khách vào" value={late} tone={late ? 'warn' : undefined} />
 			</div>
 
 			<Alert>{err}</Alert>
@@ -343,7 +291,7 @@ export function ReviewPage() {
 			{sessions === null ? (
 				<Spinner />
 			) : !rows.length ? (
-				<Empty icon="✅">Hết việc — không còn ca nào chờ đối soát.</Empty>
+				<Empty icon="✅">Hết việc — không còn ca nào chờ duyệt.</Empty>
 			) : (
 				<div className="card table-wrap">
 					<table>
@@ -353,13 +301,13 @@ export function ReviewPage() {
 								<th>Cô dọn dẹp</th>
 								<th>Nộp lúc</th>
 								<th>Ảnh</th>
-								<th className="right">Công tạm tính</th>
+								<th className="right">Thời gian dọn</th>
 								<th />
 							</tr>
 						</thead>
 						<tbody>
 							{rows.map((s) => {
-								const pending = (s.allowances || []).filter((a) => a.status === 'pending').length
+								const over = s.deadline_at && s.submitted_at > s.deadline_at
 								return (
 									<tr key={s.id}>
 										<td>
@@ -376,19 +324,14 @@ export function ReviewPage() {
 											{s.progress?.photo_count} ảnh / {s.progress?.total_required} mục
 										</td>
 										<td className="right nowrap">
-											<strong>{money(s.pay?.total)}</strong>
-											{!!pending && <div className="meta meta--warn">+{pending} phụ cấp chờ duyệt</div>}
+											<strong>{minutes(s.minutes)}</strong>
+											{over && <div className="meta meta--warn">xong sau hạn</div>}
 										</td>
 										<td className="nowrap">
 											<button className="btn btn--ghost" onClick={() => navigate(`/sessions/${s.id}`)}>
 												Xem ảnh
 											</button>
-											<button
-												className="btn btn--primary"
-												disabled={pending > 0}
-												title={pending > 0 ? 'Còn phụ cấp chờ duyệt — mở ca ra xử lý trước' : ''}
-												onClick={() => approve(s.id)}
-											>
+											<button className="btn btn--primary" onClick={() => approve(s.id)}>
 												Duyệt
 											</button>
 										</td>
@@ -409,7 +352,6 @@ export function SessionDetailPage({ sessionId }) {
 	const { navigate } = useRouter()
 	const [session, setSession] = useState(null)
 	const [err, setErr] = useState('')
-	const [deduction, setDeduction] = useState('')
 	const [note, setNote] = useState('')
 	const [preview, setPreview] = useState('')
 
@@ -418,7 +360,6 @@ export function SessionDetailPage({ sessionId }) {
 			.session(sessionId)
 			.then((d) => {
 				setSession(d.session)
-				setDeduction(d.session.deduction ? String(d.session.deduction) : '')
 				setNote(d.session.review_note || '')
 			})
 			.catch((e) => setErr(e.message))
@@ -426,23 +367,9 @@ export function SessionDetailPage({ sessionId }) {
 
 	async function review(status) {
 		try {
-			const d = await api.reviewSession({
-				id: sessionId,
-				status,
-				deduction: status === 'approved' ? Number(deduction) || 0 : 0,
-				note,
-			})
+			const d = await api.reviewSession({ id: sessionId, status, note })
 			setSession(d.session)
 			setErr('')
-		} catch (e) {
-			setErr(e.message)
-		}
-	}
-
-	async function reviewAllowance(id, status) {
-		try {
-			const d = await api.reviewAllowance(id, status)
-			setSession(d.session)
 		} catch (e) {
 			setErr(e.message)
 		}
@@ -458,7 +385,6 @@ export function SessionDetailPage({ sessionId }) {
 
 	const tpl = session.template_snapshot
 	const p = session.progress || {}
-	const pay = session.pay || {}
 	const reviewed = session.status === 'approved' || session.status === 'rejected'
 
 	return (
@@ -487,42 +413,13 @@ export function SessionDetailPage({ sessionId }) {
 				</div>
 				<div className="card pad">
 					<KV k="Ảnh bắt buộc" v={`${p.done_required}/${p.total_required} mục · ${p.photo_count} ảnh`} />
-					<KV k="Khoán phòng" v={money(session.base_fee)} />
-					<KV k="Phụ cấp đã duyệt" v={money(pay.allowance)} />
-					{!!pay.deduction && <KV k="Trừ" v={`-${money(pay.deduction)}`} danger />}
-					<KV k="Công ca này" v={pay.payable ? money(pay.total) : '—'} total />
+					<KV k="Thời gian dọn" v={minutes(session.minutes)} total />
+					{session.deadline_at > 0 && session.submitted_at > session.deadline_at && (
+						<KV k="Xong sau hạn" v={`muộn ${minutes(Math.round((session.submitted_at - session.deadline_at) / 60000))}`} danger />
+					)}
 					{!!session.reviewed_at && <KV k="Đã xử lý" v={`${hour(session.reviewed_at)} bởi ${session.reviewed_by}`} />}
 				</div>
 			</div>
-
-			{!!(session.allowances || []).length && (
-				<div className="card pad">
-					<h2>Phụ cấp cô đề nghị</h2>
-					{session.allowances.map((a) => (
-						<div key={a.id} className="allowance">
-							<div>
-								<div>
-									<strong>{a.type}</strong> — {money(a.amount)} <AllowanceBadge status={a.status} />
-								</div>
-								{a.note && <div className="meta">{a.note}</div>}
-								{!!(a.photos || []).length && (
-									<div className="strip">
-										{a.photos.map((ph, i) => (
-											<img key={i} src={photoSrc(ph.url)} alt="" onClick={() => setPreview(photoSrc(ph.url))} />
-										))}
-									</div>
-								)}
-							</div>
-							{a.status === 'pending' && (
-								<div className="nowrap">
-									<button className="btn btn--primary" onClick={() => reviewAllowance(a.id, 'approved')}>Duyệt</button>
-									<button className="btn btn--ghost" onClick={() => reviewAllowance(a.id, 'rejected')}>Không duyệt</button>
-								</div>
-							)}
-						</div>
-					))}
-				</div>
-			)}
 
 			{(tpl?.groups || []).map((g) => (
 				<div key={g.id} className="card pad">
@@ -559,17 +456,13 @@ export function SessionDetailPage({ sessionId }) {
 					{reviewed
 						? `Ca đã ${session.status === 'approved' ? 'duyệt' : 'từ chối'}${session.review_note ? ` — ${session.review_note}` : ''}. Bấm lại để đổi quyết định.`
 						: p.complete
-							? 'Đủ ảnh bắt buộc. Duyệt để chốt công cho cô.'
-							: `Còn thiếu ${(p.missing || []).length} mục ảnh — duyệt lúc này là trả tiền cho việc chưa có bằng chứng.`}
+							? 'Đủ ảnh bắt buộc. Xem qua rồi duyệt.'
+							: `Còn thiếu ${(p.missing || []).length} mục ảnh — duyệt lúc này là xác nhận việc chưa có bằng chứng.`}
 				</div>
 				<div className="sticky-actions">
-					<input className="w-sm" type="number" min="0" step="1000" placeholder="Trừ (đ)" value={deduction}
-						onChange={(e) => setDeduction(e.target.value)} />
-					<input placeholder="Ghi chú hậu kiểm (cô sẽ đọc được)" value={note} onChange={(e) => setNote(e.target.value)} />
-					<button className="btn btn--danger" onClick={() => review('rejected')}>Từ chối</button>
-					<button className="btn btn--primary" onClick={() => review('approved')}>
-						Duyệt công {money(Math.max(0, (session.base_fee || 0) - (Number(deduction) || 0) + (pay.allowance || 0)))}
-					</button>
+					<input placeholder="Ghi chú cho cô (cô sẽ đọc được)" value={note} onChange={(e) => setNote(e.target.value)} />
+					<button className="btn btn--danger" onClick={() => review('rejected')}>Trả lại</button>
+					<button className="btn btn--primary" onClick={() => review('approved')}>Duyệt</button>
 				</div>
 			</div>
 
@@ -592,10 +485,13 @@ function KV({ k, v, total, danger }) {
 	)
 }
 
-// ─── Bảng công ────────────────────────────────────────────────────────────
+// ─── Báo cáo hiệu suất ────────────────────────────────────────────────────
+//
+// Phần mềm này không tính lương. Báo cáo trả lời: hôm nay chạy được bao nhiêu ca,
+// bao nhiêu phòng, dọn trung bình bao lâu, có ca nào xong sau giờ khách vào không.
 
-export function TimesheetPage() {
-	const [month, setMonth] = useState(monthKey())
+export function ReportPage() {
+	const [day, setDay] = useState(dayKey())
 	const [data, setData] = useState(null)
 	const [err, setErr] = useState('')
 	const [open, setOpen] = useState('')
@@ -603,26 +499,17 @@ export function TimesheetPage() {
 	useEffect(() => {
 		setData(null)
 		api
-			.timesheet(month)
+			.report({ day })
 			.then(setData)
 			.catch((e) => {
 				setErr(e.message)
-				setData({ rows: [], sessions: [] })
+				setData({ rows: [], sessions: [], total: {} })
 			})
-	}, [month])
+	}, [day])
 
 	const rows = data?.rows || []
-	const grand = rows.reduce(
-		(a, r) => ({
-			rooms: a.rooms + r.rooms,
-			confirmed: a.confirmed + r.confirmed_total,
-			provisional: a.provisional + r.provisional_total,
-			total: a.total + r.total,
-			pending: a.pending + r.allowance_pending,
-		}),
-		{ rooms: 0, confirmed: 0, provisional: 0, total: 0, pending: 0 },
-	)
-	const thisMonth = monthKey()
+	const total = data?.total || {}
+	const today = dayKey()
 	const sessionsByStaff = useMemo(() => {
 		const m = {}
 		;(data?.sessions || []).forEach((s) => {
@@ -633,28 +520,29 @@ export function TimesheetPage() {
 	}, [data])
 
 	return (
-		<AdminShell active="timesheet">
+		<AdminShell active="report">
 			<div className="page-head">
 				<div>
-					<h1>Bảng công {monthLabel(month)}</h1>
-					<p className="sub">Khoán theo phòng + phụ cấp đã duyệt. Bấm một dòng để xem từng ca.</p>
+					<h1>Báo cáo {dayLabel(day, today).toLowerCase()}</h1>
+					<p className="sub">
+						Số ca dọn, số phòng và thời gian trung bình. Phần mềm không tính lương — lương theo cơ chế riêng.
+					</p>
 				</div>
 				<div className="row-actions">
-					<button className="btn btn--ghost" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
-					<button className={`btn${month === thisMonth ? ' btn--primary' : ' btn--ghost'}`} onClick={() => setMonth(thisMonth)}>
-						{monthLabel(month)}
+					<button className="btn btn--ghost" onClick={() => setDay(shiftDay(day, -1))}>‹</button>
+					<button className={`btn${day === today ? ' btn--primary' : ' btn--ghost'}`} onClick={() => setDay(today)}>
+						{dayLabel(day, today)}
 					</button>
-					<button className="btn btn--ghost" disabled={month >= thisMonth} onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
-					<a className="btn btn--ghost" href={api.timesheetCsvUrl(month)}>Xuất CSV</a>
+					<button className="btn btn--ghost" disabled={day >= today} onClick={() => setDay(shiftDay(day, 1))}>›</button>
 				</div>
 			</div>
 
 			<div className="stats">
-				<Stat label="Tổng phải trả" value={money(grand.total)} sub={`${rows.length} cô · ${grand.rooms} phòng`} />
-				<Stat label="Đã chốt" value={money(grand.confirmed)} tone="ok" sub="Quản lý đã duyệt" />
-				<Stat label="Chờ đối soát" value={money(grand.provisional)} tone={grand.provisional ? 'warn' : undefined} />
-				<Stat label="Phụ cấp chờ duyệt" value={money(grand.pending)} sub="Chưa cộng vào tổng"
-					tone={grand.pending ? 'warn' : undefined} />
+				<Stat label="Ca đã dọn xong" value={total.sessions || 0} sub={`${rows.length} cô làm việc`} />
+				<Stat label="Số phòng" value={total.rooms || 0} />
+				<Stat label="Thời gian TB mỗi ca" value={minutes(total.avg_minute)} />
+				<Stat label="Chờ duyệt ảnh" value={total.pending || 0} tone={total.pending ? 'warn' : undefined} />
+				<Stat label="Xong sau giờ khách vào" value={total.late || 0} tone={total.late ? 'danger' : 'ok'} />
 			</div>
 
 			<Alert>{err}</Alert>
@@ -662,20 +550,21 @@ export function TimesheetPage() {
 			{data === null ? (
 				<Spinner />
 			) : !rows.length ? (
-				<Empty icon="💵">Tháng này chưa có ca nào được ghi công.</Empty>
+				<Empty icon="📊">Ngày này chưa có ca nào hoàn tất.</Empty>
 			) : (
 				<div className="card table-wrap">
 					<table>
 						<thead>
 							<tr>
 								<th>Cô dọn dẹp</th>
+								<th className="right">Ca</th>
 								<th className="right">Phòng</th>
-								<th className="right">Khoán phòng</th>
-								<th className="right">Phụ cấp</th>
-								<th className="right">Trừ</th>
-								<th className="right">Đã chốt</th>
-								<th className="right">Chờ đối soát</th>
-								<th className="right">Tổng</th>
+								<th className="right">TB mỗi ca</th>
+								<th className="right">Ảnh</th>
+								<th className="right">Đã duyệt</th>
+								<th className="right">Chờ duyệt</th>
+								<th className="right">Trả lại</th>
+								<th className="right">Trễ</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -684,38 +573,30 @@ export function TimesheetPage() {
 									<tr className="clickable" onClick={() => setOpen(open === r.staff_id ? '' : r.staff_id)}>
 										<td>
 											<div className="strong">{open === r.staff_id ? '⌄' : '›'} {r.name}</div>
-											<div className="meta">
-												{r.phone}
-												{r.bank ? ` · ${r.bank}` : ''}
-												{r.rejected ? ` · ${r.rejected} ca bị từ chối` : ''}
-											</div>
+											<div className="meta">{r.phone}</div>
 										</td>
-										<td className="right">
-											{r.rooms}
-											<div className="meta">{r.rooms_confirmed} chốt / {r.rooms_pending} chờ</div>
-										</td>
-										<td className="right">{money(r.base)}</td>
-										<td className="right">
-											{money(r.allowance)}
-											{!!r.allowance_pending && <div className="meta meta--warn">+{money(r.allowance_pending)} chờ</div>}
-										</td>
-										<td className="right">{r.deduction ? `-${money(r.deduction)}` : '—'}</td>
-										<td className="right">{money(r.confirmed_total)}</td>
-										<td className="right warn">{money(r.provisional_total)}</td>
-										<td className="right"><strong>{money(r.total)}</strong></td>
+										<td className="right"><strong>{r.sessions}</strong></td>
+										<td className="right">{r.rooms}</td>
+										<td className="right">{minutes(r.avg_minute)}</td>
+										<td className="right">{r.photos}</td>
+										<td className="right">{r.approved}</td>
+										<td className="right warn">{r.pending || '—'}</td>
+										<td className="right">{r.rejected || '—'}</td>
+										<td className="right">{r.late ? <span className="danger">{r.late}</span> : '—'}</td>
 									</tr>
 									{open === r.staff_id && (
 										<tr>
-											<td colSpan="8" className="subcell">
+											<td colSpan="9" className="subcell">
 												<table className="subtable">
 													<tbody>
 														{(sessionsByStaff[r.staff_id] || [])
 															.sort((a, b) => a.checkout_at - b.checkout_at)
 															.map((s) => (
 																<tr key={s.id}>
-																	<td className="nowrap">{dayMonth(s.checkout_at)}</td>
+																	<td className="nowrap">{hour(s.checkout_at)}</td>
 																	<td>{s.room?.name || s.room_id}</td>
-																	<td className="right">{money(s.pay?.total)}</td>
+																	<td className="right">{minutes(s.minutes)}</td>
+																	<td><SessionBadge status={s.status} /></td>
 																	<td><Link to={`/sessions/${s.id}`}>xem ảnh</Link></td>
 																</tr>
 															))}
@@ -729,6 +610,100 @@ export function TimesheetPage() {
 						</tbody>
 					</table>
 				</div>
+			)}
+		</AdminShell>
+	)
+}
+
+// ─── Đánh giá của khách ───────────────────────────────────────────────────
+//
+// Lấy từ API công khai của Dayladau. Điểm `cleanliness` là thước đo trực tiếp
+// nhất chất lượng dọn dẹp; phần "Cần xử lý" lọc riêng review chê chuyện sạch sẽ
+// để quản lý không phải đọc hết vài trăm đánh giá chung chung.
+
+export function ReviewsPage() {
+	const [days, setDays] = useState(30)
+	const [data, setData] = useState(null)
+	const [err, setErr] = useState('')
+
+	useEffect(() => {
+		setData(null)
+		api
+			.reviews(days)
+			.then(setData)
+			.catch((e) => {
+				setErr(e.message)
+				setData({ stats: null })
+			})
+	}, [days])
+
+	const st = data?.stats
+
+	return (
+		<AdminShell active="reviews">
+			<div className="page-head">
+				<div>
+					<h1>Đánh giá của khách</h1>
+					<p className="sub">Lấy trực tiếp từ Dayladau. Các cô cũng xem được phần này trên điện thoại.</p>
+				</div>
+				<div className="row-actions">
+					{[7, 30, 90].map((d) => (
+						<button key={d} className={`btn${days === d ? ' btn--primary' : ' btn--ghost'}`} onClick={() => setDays(d)}>
+							{d} ngày
+						</button>
+					))}
+				</div>
+			</div>
+
+			<Alert>{err}</Alert>
+
+			{data === null ? (
+				<Spinner />
+			) : !st || !st.total ? (
+				<Empty icon="⭐">Chưa có đánh giá nào trong khoảng này.</Empty>
+			) : (
+				<>
+					<div className="stats">
+						<Stat label="Tổng đánh giá" value={st.total} />
+						<Stat label="Điểm sạch sẽ TB" value={st.avg_cleanliness ? st.avg_cleanliness.toFixed(2) : '—'}
+							tone={st.avg_cleanliness && st.avg_cleanliness < 4.5 ? 'warn' : 'ok'} />
+						<Stat label="Điểm chung TB" value={st.avg_overall ? st.avg_overall.toFixed(2) : '—'} />
+						<Stat label="Chê chưa sạch" value={st.low_clean} tone={st.low_clean ? 'danger' : 'ok'}
+							sub="điểm sạch sẽ ≤ 3" />
+						<Stat label="Có nhắc dọn dẹp" value={st.about_cleaning} />
+					</div>
+
+					{st.need_attention?.length > 0 && (
+						<div className="card pad">
+							<h2>Cần xử lý</h2>
+							{st.need_attention.map((r) => (
+								<div key={r.id} className="rv rv--bad">
+									<div className="rv-top">
+										<span>{'⭐'.repeat(Math.max(1, r.cleanliness || r.overall))}</span>
+										<span className="rv-room">{r.room_code} · {r.listing_name}</span>
+										<span className="rv-date">{dayMonth(r.created_at)}</span>
+									</div>
+									{r.comment && <div className="rv-text">{r.comment}</div>}
+								</div>
+							))}
+						</div>
+					)}
+
+					<div className="card pad">
+						<h2>Gần đây</h2>
+						{st.recent.map((r) => (
+							<div key={r.id} className={`rv${r.overall >= 4 ? ' rv--good' : ''}`}>
+								<div className="rv-top">
+									<span>{'⭐'.repeat(Math.max(1, r.overall))}</span>
+									<span className="rv-room">{r.room_code} · {r.listing_name}</span>
+									<span className="rv-date">{dayMonth(r.created_at)}</span>
+									{r.about_cleaning && <span className="tag">nhắc dọn dẹp</span>}
+								</div>
+								{r.comment && <div className="rv-text">{r.comment}</div>}
+							</div>
+						))}
+					</div>
+				</>
 			)}
 		</AdminShell>
 	)
@@ -883,8 +858,8 @@ export function RoomsPage() {
 				<div>
 					<h1>Phòng</h1>
 					<p className="sub">
-						Danh sách lấy thật từ api.dayladau.com. Đơn giá, mẫu checklist và hướng dẫn vào nhà do bạn sửa — đồng bộ lại
-						không ghi đè các mục đó.
+						Danh sách lấy thật từ api.dayladau.com. Mẫu checklist và hướng dẫn vào nhà do bạn sửa — đồng bộ lại không
+						ghi đè. Đệm dọn dẹp lấy theo cài đặt của listing bên Dayladau.
 					</p>
 				</div>
 				<button className="btn btn--primary" onClick={sync} disabled={syncing}>
@@ -907,7 +882,7 @@ export function RoomsPage() {
 								<th>Phòng</th>
 								<th>Khu vực</th>
 								<th>Loại</th>
-								<th className="right">Đơn giá khoán</th>
+								<th className="right">Đệm dọn dẹp</th>
 								<th>Mẫu checklist</th>
 								<th />
 							</tr>
@@ -922,7 +897,7 @@ export function RoomsPage() {
 									</td>
 									<td>{r.zone}</td>
 									<td>{ROOM_TYPE_LABEL[r.room_type] || r.room_type}</td>
-									<td className="right">{money(r.base_fee)}</td>
+									<td className="right">{r.clean_time || 1}h</td>
 									<td>{templates.find((t) => t.id === r.template_id)?.name || '—'}</td>
 									<td><button className="btn btn--ghost" onClick={() => setEdit(r)}>Sửa</button></td>
 								</tr>
@@ -950,7 +925,6 @@ export function RoomsPage() {
 function RoomModal({ room, templates, onClose, onSaved }) {
 	const [templateId, setTemplateId] = useState(room.template_id || '')
 	const [doorNote, setDoorNote] = useState(room.door_note || '')
-	const [baseFee, setBaseFee] = useState(String(room.base_fee || 0))
 	const [err, setErr] = useState('')
 	const [busy, setBusy] = useState(false)
 
@@ -958,7 +932,7 @@ function RoomModal({ room, templates, onClose, onSaved }) {
 		setBusy(true)
 		setErr('')
 		try {
-			await api.saveRoom({ id: room.id, template_id: templateId, door_note: doorNote, base_fee: Number(baseFee) || 0 })
+			await api.saveRoom({ id: room.id, template_id: templateId, door_note: doorNote })
 			onSaved()
 		} catch (e) {
 			setErr(e.message)
@@ -971,10 +945,6 @@ function RoomModal({ room, templates, onClose, onSaved }) {
 		<div className="modal" onClick={onClose}>
 			<div className="modal-in" onClick={(e) => e.stopPropagation()}>
 				<h2>{room.name}</h2>
-				<label className="field">
-					<span>Đơn giá khoán một lần dọn (đ)</span>
-					<input type="number" value={baseFee} onChange={(e) => setBaseFee(e.target.value)} />
-				</label>
 				<label className="field">
 					<span>Mẫu checklist</span>
 					<select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>

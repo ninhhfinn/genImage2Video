@@ -1,6 +1,6 @@
 // Mảnh giao diện dùng lại. Giữ nhỏ và không có logic nghiệp vụ.
 
-import { SESSION_LABEL, STAFF_LABEL, ALLOWANCE_LABEL } from '../format.js'
+import { SESSION_LABEL, STAFF_LABEL } from '../format.js'
 
 const SESSION_TONE = {
 	todo: 'neutral',
@@ -11,7 +11,6 @@ const SESSION_TONE = {
 }
 
 const STAFF_TONE = { pending: 'warn', active: 'ok', suspended: 'neutral', rejected: 'danger' }
-const ALLOWANCE_TONE = { pending: 'warn', approved: 'ok', rejected: 'danger' }
 
 export function Badge({ tone = 'neutral', children }) {
 	return <span className={`badge badge--${tone}`}>{children}</span>
@@ -22,10 +21,6 @@ export const SessionBadge = ({ status }) => (
 )
 
 export const StaffBadge = ({ status }) => <Badge tone={STAFF_TONE[status]}>{STAFF_LABEL[status] || status}</Badge>
-
-export const AllowanceBadge = ({ status }) => (
-	<Badge tone={ALLOWANCE_TONE[status]}>{ALLOWANCE_LABEL[status] || status}</Badge>
-)
 
 export function Stat({ label, value, sub, tone }) {
 	return (

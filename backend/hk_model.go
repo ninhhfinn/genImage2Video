@@ -26,12 +26,6 @@ const (
 )
 
 const (
-	HKAllowancePending  = "pending"
-	HKAllowanceApproved = "approved"
-	HKAllowanceRejected = "rejected"
-)
-
-const (
 	HKRoleAdmin   = "admin"
 	HKRoleCleaner = "cleaner"
 )
@@ -70,7 +64,8 @@ type HKRoom struct {
 	HostName   string `json:"host_name"`
 	TemplateID string `json:"template_id"`
 	DoorNote   string `json:"door_note"`
-	BaseFee    int64  `json:"base_fee"`
+	// Đệm dọn dẹp tối thiểu giữa hai lượt khách, lấy từ listing (`clean_time`).
+	CleanTime  int    `json:"clean_time"`
 	CheckinHr  int    `json:"checkin_hour"`
 	CheckoutHr int    `json:"checkout_hour"`
 	Active     bool   `json:"active"`
@@ -111,17 +106,6 @@ type HKItemState struct {
 	CheckedAt int64     `json:"checked_at,omitempty"`
 }
 
-type HKAllowance struct {
-	ID        string    `json:"id"`
-	SessionID string    `json:"session_id"`
-	Type      string    `json:"type"`
-	Amount    int64     `json:"amount"`
-	Note      string    `json:"note"`
-	Photos    []HKPhoto `json:"photos"`
-	Status    string    `json:"status"`
-	CreatedAt int64     `json:"created_at"`
-}
-
 type HKSession struct {
 	ID         string `json:"id"`
 	Day        string `json:"day"` // YYYY-MM-DD
@@ -136,11 +120,14 @@ type HKSession struct {
 	DeadlineAt    int64 `json:"deadline_at"`
 
 	GuestNote string `json:"guest_note"`
-	BaseFee   int64  `json:"base_fee"`
-	Deduction int64  `json:"deduction"`
+
+	// Mã lượt đặt lấy từ iCal — khoá chống trùng khi đồng bộ chạy lại.
+	// Phải là mã lượt chứ không phải (phòng, ngày): 59/60 phòng cho thuê theo
+	// giờ nên một phòng có thể có nhiều lượt khách trong cùng một ngày, mỗi lượt
+	// là một ca dọn kỹ riêng.
+	BookingUID string `json:"booking_uid"`
 
 	ItemsState map[string]HKItemState `json:"items_state"`
-	Allowances []HKAllowance          `json:"allowances"`
 
 	StartedAt   int64  `json:"started_at"`
 	SubmittedAt int64  `json:"submitted_at"`
@@ -154,35 +141,26 @@ type HKSession struct {
 	TemplateSnapshot *HKTemplate `json:"template_snapshot,omitempty"`
 }
 
-// ─── Loại phòng & đơn giá khoán ───────────────────────────────────────────
+// ─── Loại phòng ───────────────────────────────────────────────────────────
+//
+// Chỉ còn để gán mẫu checklist — 2 phòng ngủ nhiều việc hơn studio. Không còn
+// đơn giá vì phần mềm này không tính lương.
 
 type HKRoomType struct {
-	Key     string `json:"key"`
-	Label   string `json:"label"`
-	BaseFee int64  `json:"base_fee"`
+	Key   string `json:"key"`
+	Label string `json:"label"`
 }
 
-// Đơn giá khoán mặc định. Để trong code vì đây là bản đầu; khi giá đổi theo mùa
-// (Tết) thì chuyển sang bảng cấu hình để không phải deploy lại.
 var hkRoomTypes = []HKRoomType{
-	{Key: "studio", Label: "Studio", BaseFee: 80000},
-	{Key: "one_bedroom", Label: "1 phòng ngủ", BaseFee: 100000},
-	{Key: "two_bedroom", Label: "2 phòng ngủ", BaseFee: 140000},
-	{Key: "duplex", Label: "Duplex / nhiều tầng", BaseFee: 180000},
-}
-
-func hkDefaultBaseFee(roomType string) int64 {
-	for _, t := range hkRoomTypes {
-		if t.Key == roomType {
-			return t.BaseFee
-		}
-	}
-	return 0
+	{Key: "studio", Label: "Studio"},
+	{Key: "one_bedroom", Label: "1 phòng ngủ"},
+	{Key: "two_bedroom", Label: "2 phòng ngủ"},
+	{Key: "duplex", Label: "Duplex / nhiều tầng"},
 }
 
 // hkRoomTypeFromBedrooms suy loại phòng từ số phòng ngủ của listing Dayladau.
-// 0 phòng ngủ = studio (API trả 0 cho căn không chia phòng), >=3 coi như duplex
-// vì khối lượng dọn tương đương chứ không phải vì kiến trúc giống nhau.
+// API trả 0 cho căn không chia phòng; từ 3 phòng ngủ trở lên coi như duplex vì
+// khối lượng dọn tương đương, không phải vì kiến trúc giống nhau.
 func hkRoomTypeFromBedrooms(bedrooms int) string {
 	switch {
 	case bedrooms <= 0:
@@ -194,32 +172,6 @@ func hkRoomTypeFromBedrooms(bedrooms int) string {
 	default:
 		return "duplex"
 	}
-}
-
-// ─── Loại phụ cấp ─────────────────────────────────────────────────────────
-
-type HKAllowanceType struct {
-	Key           string `json:"key"`
-	Label         string `json:"label"`
-	DefaultAmount int64  `json:"default_amount"`
-}
-
-var hkAllowanceTypes = []HKAllowanceType{
-	{Key: "bed_linen", Label: "Giặt chăn ga gối", DefaultAmount: 30000},
-	{Key: "deep_clean", Label: "Dọn sâu (khách để bẩn)", DefaultAmount: 50000},
-	{Key: "extra_trash", Label: "Rác phát sinh nhiều", DefaultAmount: 20000},
-	{Key: "far_travel", Label: "Di chuyển xa", DefaultAmount: 25000},
-	{Key: "supply_buy", Label: "Mua đồ tiêu hao hộ", DefaultAmount: 0},
-	{Key: "other", Label: "Khác", DefaultAmount: 0},
-}
-
-func hkValidAllowanceType(key string) bool {
-	for _, t := range hkAllowanceTypes {
-		if t.Key == key {
-			return true
-		}
-	}
-	return false
 }
 
 // ─── Tiến độ checklist ────────────────────────────────────────────────────
@@ -322,157 +274,6 @@ func hkTemplateFor(s *HKSession, live *HKTemplate) *HKTemplate {
 	return live
 }
 
-// ─── Tính công ────────────────────────────────────────────────────────────
-
-type HKPay struct {
-	Base             int64 `json:"base"`
-	Deduction        int64 `json:"deduction"`
-	Allowance        int64 `json:"allowance"`
-	AllowancePending int64 `json:"allowance_pending"`
-	Total            int64 `json:"total"`
-	Payable          bool  `json:"payable"`
-	Confirmed        bool  `json:"confirmed"`
-}
-
-// hkPayable: ca `submitted` VẪN tính tiền (cột tạm tính).
-//
-// Cô làm xong việc thì phải thấy tiền của mình ngay; nếu chỉ đếm ca đã duyệt thì
-// suốt tuần bảng công hiện 0đ và không ai tin cái tool.
-func hkPayable(status string) bool {
-	return status == HKSessionApproved || status == HKSessionSubmitted
-}
-
-func hkSumAllowances(s *HKSession, status string) int64 {
-	var sum int64
-	for _, a := range s.Allowances {
-		st := a.Status
-		if st == "" {
-			st = HKAllowancePending
-		}
-		if st == status {
-			sum += a.Amount
-		}
-	}
-	return sum
-}
-
-// hkComputePay: công = khoán phòng − trừ + phụ cấp ĐÃ DUYỆT.
-//
-// Phụ cấp `pending` không cộng vào bất kỳ cột nào, kể cả tạm tính: nó là khoản cô
-// tự khai, hiện như tiền đã có rồi sau đó quản lý cắt đi mới là thứ gây cãi nhau
-// thật sự. Nó nằm riêng ở AllowancePending để cả hai bên thấy "đang chờ duyệt".
-func hkComputePay(s *HKSession) HKPay {
-	if s == nil {
-		return HKPay{}
-	}
-	p := HKPay{
-		Payable:          hkPayable(s.Status),
-		Confirmed:        s.Status == HKSessionApproved,
-		AllowancePending: hkSumAllowances(s, HKAllowancePending),
-	}
-	if !p.Payable {
-		return p
-	}
-	p.Base = s.BaseFee
-	// Trừ không được vượt quá tiền khoán — công âm là lỗi nhập liệu, không phải
-	// chính sách. Trừ âm (nhập sai dấu) cũng bị bỏ qua, không biến thành thưởng.
-	d := s.Deduction
-	if d < 0 {
-		d = 0
-	}
-	if d > p.Base {
-		d = p.Base
-	}
-	p.Deduction = d
-	p.Allowance = hkSumAllowances(s, HKAllowanceApproved)
-	p.Total = p.Base - p.Deduction + p.Allowance
-	return p
-}
-
-// ─── Bảng công ────────────────────────────────────────────────────────────
-
-type HKTimesheetRow struct {
-	StaffID          string `json:"staff_id"`
-	Name             string `json:"name"`
-	Phone            string `json:"phone"`
-	Bank             string `json:"bank"`
-	Rooms            int    `json:"rooms"`
-	RoomsConfirmed   int    `json:"rooms_confirmed"`
-	RoomsPending     int    `json:"rooms_pending"`
-	Rejected         int    `json:"rejected"`
-	Base             int64  `json:"base"`
-	Deduction        int64  `json:"deduction"`
-	Allowance        int64  `json:"allowance"`
-	AllowancePending int64  `json:"allowance_pending"`
-	ConfirmedTotal   int64  `json:"confirmed_total"`
-	ProvisionalTotal int64  `json:"provisional_total"`
-	Total            int64  `json:"total"`
-}
-
-func hkBuildTimesheet(sessions []HKSession, users map[string]HKUser) []HKTimesheetRow {
-	byStaff := map[string]*HKTimesheetRow{}
-	var order []string
-
-	for i := range sessions {
-		s := &sessions[i]
-		if s.StaffID == "" {
-			continue
-		}
-		row, ok := byStaff[s.StaffID]
-		if !ok {
-			u := users[s.StaffID]
-			name := u.Name
-			if name == "" {
-				// Ca trỏ tới tài khoản đã xoá vẫn phải hiện — nuốt mất nó là nuốt
-				// mất tiền của một người đã làm việc thật.
-				name = "Không rõ"
-			}
-			row = &HKTimesheetRow{StaffID: s.StaffID, Name: name, Phone: u.Phone, Bank: u.Bank}
-			byStaff[s.StaffID] = row
-			order = append(order, s.StaffID)
-		}
-
-		if s.Status == HKSessionRejected {
-			row.Rejected++
-		}
-		pay := hkComputePay(s)
-		row.AllowancePending += pay.AllowancePending
-		if !pay.Payable {
-			continue
-		}
-		row.Rooms++
-		row.Base += pay.Base
-		row.Deduction += pay.Deduction
-		row.Allowance += pay.Allowance
-		row.Total += pay.Total
-		if pay.Confirmed {
-			row.RoomsConfirmed++
-			row.ConfirmedTotal += pay.Total
-		} else {
-			row.RoomsPending++
-			row.ProvisionalTotal += pay.Total
-		}
-	}
-
-	out := make([]HKTimesheetRow, 0, len(order))
-	for _, id := range order {
-		out = append(out, *byStaff[id])
-	}
-	// Sắp theo tổng tiền giảm dần; bằng nhau thì theo tên để thứ tự ổn định giữa
-	// các lần gọi (bảng công nhảy lung tung giữa hai lần F5 làm mất tin tưởng).
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0; j-- {
-			a, b := out[j-1], out[j]
-			if b.Total > a.Total || (b.Total == a.Total && b.Name < a.Name) {
-				out[j-1], out[j] = b, a
-				continue
-			}
-			break
-		}
-	}
-	return out
-}
-
 // ─── Chuyển trạng thái ────────────────────────────────────────────────────
 
 // hkDeriveStatus suy trạng thái TỪ DỮ LIỆU, không tin cờ tự do.
@@ -510,4 +311,117 @@ func hkNormalizePhone(p string) string {
 		s = "0" + s[2:]
 	}
 	return s
+}
+
+// ─── Chỉ số hiệu suất ─────────────────────────────────────────────────────
+//
+// Hệ thống này KHÔNG tính lương. Lương của cô dọn dẹp tính theo cơ chế riêng
+// (lương cứng + thưởng review + thưởng ngoài) ở ngoài phần mềm. Ở đây chỉ ghi
+// nhận công việc đã làm và đo hiệu suất, để quản lý có số liệu và để chính cô
+// thấy mình đang làm thế nào.
+
+type HKPerfRow struct {
+	StaffID string `json:"staff_id"`
+	Name    string `json:"name"`
+	Phone   string `json:"phone"`
+
+	Sessions  int `json:"sessions"`   // số ca dọn đã hoàn tất
+	Rooms     int `json:"rooms"`      // số phòng khác nhau đã dọn
+	Approved  int `json:"approved"`   // quản lý đã duyệt ảnh
+	Pending   int `json:"pending"`    // đủ ảnh, chờ quản lý xem
+	Rejected  int `json:"rejected"`   // bị trả lại
+	Late      int `json:"late"`       // xong sau hạn
+	Photos    int `json:"photos"`     // tổng ảnh đã chụp
+	AvgMinute int `json:"avg_minute"` // thời gian dọn trung bình, phút
+}
+
+// hkSessionMinutes — thời gian dọn một ca, tính từ lúc bấm bắt đầu tới lúc đủ ảnh.
+//
+// Trả 0 khi thiếu mốc hoặc số vô lý. Ca kéo dài quá 8 tiếng gần như chắc chắn là
+// cô quên bấm bắt đầu từ hôm trước chứ không phải dọn 8 tiếng thật; đưa vào trung
+// bình thì một bản ghi hỏng kéo lệch cả báo cáo tháng.
+func hkSessionMinutes(s *HKSession) int {
+	if s == nil || s.StartedAt <= 0 || s.SubmittedAt <= 0 {
+		return 0
+	}
+	d := s.SubmittedAt - s.StartedAt
+	if d <= 0 || d > 8*3600*1000 {
+		return 0
+	}
+	return int(d / 60000)
+}
+
+// hkBuildPerf gom hiệu suất theo người trong khoảng thời gian đã lọc.
+func hkBuildPerf(sessions []HKSession, users map[string]HKUser, progressOf func(*HKSession) HKProgress) []HKPerfRow {
+	type acc struct {
+		row     *HKPerfRow
+		rooms   map[string]bool
+		minutes []int
+	}
+	byStaff := map[string]*acc{}
+	var order []string
+
+	for i := range sessions {
+		s := &sessions[i]
+		if s.StaffID == "" {
+			continue
+		}
+		a, ok := byStaff[s.StaffID]
+		if !ok {
+			u := users[s.StaffID]
+			name := u.Name
+			if name == "" {
+				name = "Không rõ"
+			}
+			a = &acc{row: &HKPerfRow{StaffID: s.StaffID, Name: name, Phone: u.Phone}, rooms: map[string]bool{}}
+			byStaff[s.StaffID] = a
+			order = append(order, s.StaffID)
+		}
+
+		switch s.Status {
+		case HKSessionApproved:
+			a.row.Approved++
+		case HKSessionSubmitted:
+			a.row.Pending++
+		case HKSessionRejected:
+			a.row.Rejected++
+		}
+		// Chỉ đếm là "đã dọn" khi thật sự đủ ảnh — ca bỏ dở không phải thành tích.
+		if s.Status != HKSessionApproved && s.Status != HKSessionSubmitted {
+			continue
+		}
+		a.row.Sessions++
+		a.rooms[s.RoomID] = true
+		if progressOf != nil {
+			a.row.Photos += progressOf(s).PhotoCount
+		}
+		if m := hkSessionMinutes(s); m > 0 {
+			a.minutes = append(a.minutes, m)
+		}
+		if s.DeadlineAt > 0 && s.SubmittedAt > s.DeadlineAt {
+			a.row.Late++
+		}
+	}
+
+	out := make([]HKPerfRow, 0, len(order))
+	for _, id := range order {
+		a := byStaff[id]
+		a.row.Rooms = len(a.rooms)
+		if n := len(a.minutes); n > 0 {
+			sum := 0
+			for _, m := range a.minutes {
+				sum += m
+			}
+			a.row.AvgMinute = sum / n
+		}
+		out = append(out, *a.row)
+	}
+	// Nhiều ca nhất lên đầu; bằng nhau thì theo tên để thứ tự ổn định.
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && (out[j].Sessions > out[j-1].Sessions ||
+			(out[j].Sessions == out[j-1].Sessions && out[j].Name < out[j-1].Name)); j-- {
+			out[j-1], out[j] = out[j], out[j-1]
+		}
+	}
+	return out
 }

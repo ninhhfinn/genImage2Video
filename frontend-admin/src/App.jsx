@@ -9,15 +9,16 @@ import { AuthProvider, isAdmin, useAuth } from './auth.jsx'
 import { RouterProvider, matchPath, useRouter } from './router.jsx'
 import { LoginPage, RegisterPage } from './LoginPage.jsx'
 import { Spinner } from './components/ui.jsx'
-import { CleanerPayPage, CleanerSessionPage, CleanerTodayPage } from './cleaner/CleanerPages.jsx'
+import { CleanerMePage, CleanerSessionPage, CleanerTodayPage } from './cleaner/CleanerPages.jsx'
 import {
 	BoardPage,
 	ChecklistPage,
+	ReportPage,
 	ReviewPage,
+	ReviewsPage,
 	RoomsPage,
 	SessionDetailPage,
 	StaffPage,
-	TimesheetPage,
 } from './admin/AdminPages.jsx'
 
 const PUBLIC = ['/login', '/register']
@@ -47,7 +48,7 @@ function Routes() {
 	// ── Màn của cô dọn dẹp ──
 	const cleanerSession = matchPath('/cleaning/session/:id', path)
 	if (cleanerSession) return <CleanerSessionPage sessionId={cleanerSession.id} />
-	if (path === '/cleaning/pay') return <CleanerPayPage />
+	if (path === '/cleaning/me') return <CleanerMePage />
 	if (path === '/cleaning') return <CleanerTodayPage />
 
 	// Cô dọn dẹp gõ tay URL của quản lý → đẩy về ca hôm nay.
@@ -59,7 +60,8 @@ function Routes() {
 	const adminSession = matchPath('/sessions/:id', path)
 	if (adminSession) return <SessionDetailPage sessionId={adminSession.id} />
 	if (path === '/review') return <ReviewPage />
-	if (path === '/timesheet') return <TimesheetPage />
+	if (path === '/report') return <ReportPage />
+	if (path === '/reviews') return <ReviewsPage />
 	if (path === '/staff') return <StaffPage />
 	if (path === '/rooms') return <RoomsPage />
 	if (path === '/checklists') return <ChecklistPage />

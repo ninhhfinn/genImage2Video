@@ -80,34 +80,42 @@ Biến môi trường:
    *Chờ duyệt*, chưa đăng nhập được.
 2. **Quản lý duyệt** ở tab *Cô dọn dẹp*.
 3. **Quản lý đồng bộ phòng** ở tab *Phòng* — kéo listing thật từ
-   `api.dayladau.com`. Đơn giá khoán, mẫu checklist, hướng dẫn vào nhà sửa tay;
-   lần đồng bộ sau **không ghi đè** các mục đã sửa.
-4. **Tạo ca dọn** ở tab *Ca dọn* (xem giới hạn bên dưới), rồi xếp cô phụ trách.
-   Hệ gợi ý theo khu vực, quản lý đổi được.
+   `api.dayladau.com`. Mẫu checklist và hướng dẫn vào nhà sửa tay; lần đồng bộ
+   sau **không ghi đè** các mục đã sửa.
+4. **Đồng bộ lịch** ở tab *Ca dọn* — đọc iCal của từng phòng và tạo ca cho mọi
+   lượt khách trả phòng trong 14 ngày tới. Hệ gợi ý cô phụ trách theo khu vực,
+   quản lý đổi được.
 5. **Cô mở checklist**, chụp ảnh từng mục. Ảnh gửi lên ngay khi chụp, không có
    nút Lưu.
-6. **Đủ ảnh bắt buộc → tự chấm công.** Ca chuyển *Chờ đối soát*, tiền hiện ngay
-   trong mục "Công của tôi" của cô. Cô không phải bấm thêm nút nào.
-7. **Quản lý hậu kiểm** ở tab *Đối soát công*: xem ảnh rồi Duyệt, hoặc trừ tiền
-   kèm lý do, hoặc Từ chối. Cô đọc được lý do trên điện thoại.
-8. **Cuối tháng** mở tab *Bảng công*, xuất CSV cho kế toán.
+6. **Đủ ảnh bắt buộc → ca tự ghi nhận xong**, chuyển sang *Chờ đối soát*. Cô
+   không phải bấm thêm nút nào.
+7. **Quản lý duyệt ảnh** ở tab *Duyệt ảnh*: xem qua rồi Duyệt, hoặc Trả lại kèm
+   lý do. Cô đọc được lý do trên điện thoại.
+8. **Theo dõi** ở tab *Báo cáo* (số ca, số phòng, thời gian trung bình) và tab
+   *Đánh giá khách*.
 
-### Cách tính công
+### Phần mềm này KHÔNG tính lương
 
-```
-công một ca = đơn giá khoán − trừ + tổng phụ cấp ĐÃ DUYỆT
-tính tiền khi ca ở trạng thái: chờ đối soát HOẶC đã duyệt
-```
+Lương của cô dọn dẹp tính theo cơ chế riêng ở ngoài (lương cứng + thưởng review +
+thưởng ngoài). Ở đây chỉ ghi nhận công việc đã làm và đo hiệu suất:
 
-- Ca *chờ đối soát* đã vào cột **tạm tính** — cô làm xong là thấy tiền ngay,
-  không phải chờ hết tuần.
-- Phụ cấp cô tự khai chỉ cộng vào tổng **sau khi quản lý duyệt**. Trước đó nó nằm
-  riêng ở cột "chờ duyệt" để không ai hiểu nhầm là tiền đã có.
-- Trừ không bao giờ vượt quá tiền khoán — công không âm.
+- **số ca dọn** — mỗi lượt khách trả phòng là một ca dọn kỹ
+- **số phòng** khác nhau đã dọn
+- **thời gian dọn trung bình** — tính từ lúc bấm Bắt đầu tới lúc đủ ảnh
+- **số ca xong sau giờ khách vào**
 
-Toàn bộ phép tính nằm ở `backend/hk_model.go` và **chỉ ở đó**. Frontend không tự
-cộng lại; nếu để React tính song song thì sớm muộn hai bên lệch nhau, và bên sai
-luôn là bên cô dọn dẹp nhìn thấy.
+Ca kéo dài quá 8 tiếng bị loại khỏi trung bình: gần như chắc chắn là quên bấm
+Bắt đầu từ hôm trước, và một bản ghi hỏng đủ để kéo lệch cả báo cáo tháng.
+
+### Mỗi lượt khách một ca — không phải mỗi ngày một ca
+
+59/60 phòng của Dayladau cho thuê theo giờ, nên một phòng có thể có nhiều lượt
+khách trong cùng một ngày và mỗi lượt phải dọn kỹ riêng. Khoá chống trùng vì thế
+là **mã lượt đặt** lấy từ iCal, không phải cặp (phòng, ngày).
+
+Hạn dọn xong: giờ khách sau nhận phòng, nhưng **không bao giờ ngắn hơn `clean_time`**
+(đệm dọn dẹp cấu hình ở listing bên Dayladau, tối thiểu 1h). Ép hạn sát hơn đệm là
+đặt ra một mốc không ai làm kịp.
 
 ---
 
@@ -120,15 +128,19 @@ luôn là bên cô dọn dẹp nhìn thấy.
 - Tài khoản, mật khẩu (bcrypt), phiên đăng nhập, phân quyền.
 - Ảnh checklist lưu xuống đĩa, chấm công, bảng công, CSV.
 
-**Chưa thật — cần bạn cung cấp để hoàn thiện:**
+- **Lịch đặt phòng** — đọc từ feed iCal `/v1/listings/{id}/ical`, chính feed host
+  dán sang Airbnb/Booking. Công khai, không cần token. Lượt `Blocked by dayladau`
+  (chủ nhà tự khoá, không có khách) bị loại — dọn ở đó là giao việc không tồn tại.
+- **Đánh giá của khách** — `/v1/listings/{id}/reviews`, công khai. Có điểm
+  `cleanliness` riêng từng review.
 
-- **Lịch check-out từng ngày.** Endpoint listing ở trên là API *tìm phòng* (phòng
-  nào còn trống), không phải lịch đặt. Muốn biết "hôm nay phòng nào khách trả"
-  phải gọi API reservations của host — endpoint đó cần xác thực và hiện chưa có
-  token. Chỗ cắm vào đã chừa sẵn ở `hkFetchCheckouts()` trong
-  `backend/hk_sync.go`; thay thân hàm đó là xong, phần còn lại không phải sửa.
+**Giới hạn còn lại:**
 
-  Trong lúc chờ, quản lý bấm **“+ Thêm ca”** ở tab *Ca dọn* để tạo ca thủ công.
+- iCal chỉ cho **ngày**, không cho **giờ**. Với phòng thuê theo giờ, hai lượt
+  khách trong cùng một ngày không phân biệt được giờ nào; giờ hiển thị là giờ trả
+  phòng chuẩn của căn, quản lý sửa lại được trên màn điều phối. Muốn giờ chính
+  xác thì phải đấu `/v2/calendars/search` kèm access_token của tài khoản host —
+  ghi chú đã để sẵn trong `backend/hk_ical.go`.
 
 ---
 
@@ -170,9 +182,10 @@ phải đổi `handlePhotoUpload` trong `backend/hk_api.go` — chỗ khác khô
 cd backend && go test .
 ```
 
-52 test cho module này: luật tính công, điều kiện đủ ảnh, phân quyền (cô không
-xem được ca của cô khác, không tự duyệt được tiền của mình), ảnh giả bị loại, dữ
-liệu sống sót sau khi khởi động lại.
+Test cho module này: đọc iCal (bỏ lượt khoá lịch, đệm dọn dẹp là sàn cứng), chỉ
+số hiệu suất, lọc review liên quan dọn dẹp, điều kiện đủ ảnh, phân quyền (cô
+không xem được ca của cô khác), ảnh giả bị loại, dữ liệu sống sót sau khởi động
+lại, đồng bộ hai lần không đẻ ca trùng nhưng hai lượt khách cùng ngày ra hai ca.
 
 Hai test `TestRenderListingOverlayPNG_*` cần ImageMagick (`brew install
 imagemagick`); chúng thuộc công cụ video, không liên quan module này.
@@ -187,6 +200,8 @@ backend/
 ├── hk_store.go     SQLite; đổi sang Postgres/Firebase chỉ phải sửa file này
 ├── hk_auth.go      bcrypt, token, phân quyền
 ├── hk_sync.go      đồng bộ phòng từ Dayladau + tạo ca
+├── hk_ical.go       đọc lịch đặt phòng từ feed iCal
+├── hk_reviews.go    đánh giá của khách + lọc phần liên quan dọn dẹp
 ├── hk_api.go       HTTP handlers
 ├── hk_seed.go      mẫu checklist khởi tạo
 └── hk_*_test.go
@@ -195,7 +210,7 @@ frontend-admin/
 ├── src/api.js              lớp gọi API duy nhất
 ├── src/auth.jsx            phiên đăng nhập
 ├── src/router.jsx          router tối giản (~60 dòng, không thư viện ngoài)
-├── src/admin/AdminPages.jsx    6 màn quản lý
+├── src/admin/AdminPages.jsx    7 màn quản lý
 ├── src/cleaner/CleanerPages.jsx 3 màn của cô dọn dẹp
 └── src/styles.css
 ```

@@ -106,19 +106,18 @@ export const api = {
 		return get('/api/hk/sessions' + (s ? '?' + s : ''))
 	},
 	session: (id) => get('/api/hk/sessions/get?id=' + encodeURIComponent(id)),
-	createSession: (payload) => post('/api/hk/sessions/create', payload),
+	syncSessions: (ahead) => post('/api/hk/sessions/sync', { ahead }),
 	startSession: (id) => post('/api/hk/sessions/start', { id }),
 	saveItem: (id, itemId, patch) => post('/api/hk/sessions/item', { id, item_id: itemId, ...patch }),
 	submitSession: (id) => post('/api/hk/sessions/submit', { id }),
 	assignSession: (id, staffId) => post('/api/hk/sessions/assign', { id, staff_id: staffId }),
 	reviewSession: (payload) => post('/api/hk/sessions/review', payload),
 
-	addAllowance: (payload) => post('/api/hk/allowances', payload),
-	reviewAllowance: (id, status, amount) => post('/api/hk/allowances/review', { id, status, amount }),
-
-	timesheet: (month) => get('/api/hk/timesheet?month=' + encodeURIComponent(month)),
-	timesheetCsvUrl: (month) =>
-		`/api/hk/timesheet.csv?month=${encodeURIComponent(month)}&hk_token=${encodeURIComponent(getToken())}`,
+	report: ({ day, month }) => {
+		const q = day ? 'day=' + encodeURIComponent(day) : 'month=' + encodeURIComponent(month)
+		return get('/api/hk/report?' + q)
+	},
+	reviews: (days = 30) => get('/api/hk/reviews?days=' + days),
 
 	uploadPhoto: (file) => {
 		const fd = new FormData()

@@ -1,7 +1,15 @@
 // Định dạng hiển thị. KHÔNG có phép tính tiền ở đây — backend tính, frontend hiện.
 
-export function money(n) {
-	return (Math.round(Number(n) || 0)).toLocaleString('vi-VN') + 'đ'
+// Không có hàm định dạng tiền: phần mềm này không tính lương.
+
+/** Thời lượng phút → "1h20p" hoặc "45p". */
+export function minutes(m) {
+	const n = Math.round(Number(m) || 0)
+	if (!n) return '—'
+	if (n < 60) return n + 'p'
+	const h = Math.floor(n / 60)
+	const r = n % 60
+	return r ? `${h}h${r}p` : `${h}h`
 }
 
 export function count(n) {
@@ -70,12 +78,6 @@ export const STAFF_LABEL = {
 	active: 'Đang làm',
 	suspended: 'Tạm khoá',
 	rejected: 'Từ chối',
-}
-
-export const ALLOWANCE_LABEL = {
-	pending: 'Chờ duyệt',
-	approved: 'Đã duyệt',
-	rejected: 'Không duyệt',
 }
 
 export const ROOM_TYPE_LABEL = {
