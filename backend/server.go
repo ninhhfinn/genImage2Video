@@ -137,16 +137,16 @@ func startWebServer(port int) error {
 	serveAdminSPA := makeSPAHandler("dist-admin")
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// `/assets-admin/…` phải về app quản lý dù đứng ở tên miền nào: khi chạy
-		// local dưới /admin, trình duyệt xin tài nguyên bằng đường dẫn tuyệt đối
-		// nên nó không mang theo tiền tố /admin nữa.
-		if isAdminHost(r) || strings.HasPrefix(r.URL.Path, "/admin") ||
+		// `/assets-admin/…` phải về app dọn dẹp dù đứng ở đường dẫn nào: trình
+		// duyệt xin tài nguyên bằng đường dẫn tuyệt đối nên nó không mang theo
+		// tiền tố /unixstay.
+		if isAdminHost(r) || strings.HasPrefix(r.URL.Path, hkPathPrefix) ||
 			strings.HasPrefix(r.URL.Path, "/assets-admin/") {
 			if serveAdminSPA != nil {
 				serveAdminSPA(w, r)
 				return
 			}
-			http.Error(w, "Chưa build app quản lý dọn dẹp. Chạy: cd frontend-admin && npm run build", 503)
+			http.Error(w, "Chưa build app dọn dẹp. Chạy: cd frontend-admin && npm run build", 503)
 			return
 		}
 		if serveSPA != nil {
@@ -161,9 +161,15 @@ func startWebServer(port int) error {
 	return http.ListenAndServe(addr, handler)
 }
 
-// isAdminHost nhận ra app quản lý dọn dẹp theo tên miền: admin.quanlyhomestay.com
-// hoặc bất kỳ host nào bắt đầu bằng "admin.". Chạy local không có subdomain nên
-// còn đường /admin/... để dev bấm thử — xem handler ở trên.
+// hkPathPrefix — app dọn dẹp phục vụ dưới đường dẫn con này.
+//
+// Dùng đường dẫn con thay vì tên miền phụ để đi chung tunnel Cloudflare sẵn có
+// của video.quanlyhomestay.com, khỏi phải khai báo route mới.
+const hkPathPrefix = "/unixstay"
+
+// isAdminHost vẫn nhận tên miền bắt đầu bằng "admin." — giữ lại để sau này muốn
+// tách sang admin.quanlyhomestay.com thì chỉ phải thêm route tunnel, không phải
+// sửa code. Hiện tại không tên miền nào trỏ vào đây nên nhánh này im lặng.
 func isAdminHost(r *http.Request) bool {
 	host := r.Host
 	if i := strings.IndexByte(host, ':'); i >= 0 {
@@ -184,7 +190,7 @@ func makeSPAHandler(distDir string) http.HandlerFunc {
 	fs := http.FileServer(http.Dir(distDir))
 	indexPath := filepath.Join(distDir, "index.html")
 	return func(w http.ResponseWriter, r *http.Request) {
-		clean := filepath.Clean("/" + strings.TrimPrefix(r.URL.Path, "/admin"))
+		clean := filepath.Clean("/" + strings.TrimPrefix(r.URL.Path, hkPathPrefix))
 		if clean == "/" {
 			http.ServeFile(w, r, indexPath)
 			return

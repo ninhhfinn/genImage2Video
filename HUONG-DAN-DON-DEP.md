@@ -1,13 +1,19 @@
-# Module Dọn dẹp — admin.quanlyhomestay.com
+# Module Dọn dẹp — video.quanlyhomestay.com/unixstay
 
 App checklist dọn phòng + chấm công cho cô dọn dẹp theo giờ, chạy chung binary
 với công cụ video trong repo này.
 
 | | |
 |---|---|
-| Quản lý | `https://admin.quanlyhomestay.com` |
-| Cô dọn dẹp | cùng địa chỉ — backend tự đưa về màn của cô theo vai |
+| Quản lý & cô dọn dẹp | `https://video.quanlyhomestay.com/unixstay` |
 | Công cụ video | `https://video.quanlyhomestay.com` (không đổi gì) |
+
+Cùng một địa chỉ cho cả hai vai — backend tự đưa về màn đúng theo vai đăng nhập.
+
+Dùng **đường dẫn con** `/unixstay` chứ không phải tên miền phụ, để đi chung
+tunnel Cloudflare sẵn có của `video.quanlyhomestay.com` — không phải khai báo
+route mới. Muốn tách sang `admin.quanlyhomestay.com` sau này thì chỉ cần thêm
+route tunnel; backend đã nhận sẵn mọi tên miền bắt đầu bằng `admin.`.
 
 ---
 
@@ -24,10 +30,7 @@ cd ../backend
 go run . --web --port 8080
 ```
 
-Mở `http://localhost:8080/admin`.
-
-Local không có tên miền phụ nên app nằm dưới `/admin`. Trên máy chủ thật, backend
-nhận ra `admin.` ở đầu tên miền và phục vụ ngay ở gốc `/`.
+Mở `http://localhost:8080/unixstay`.
 
 ### Sửa giao diện (chạy song song, không phải build lại mỗi lần)
 

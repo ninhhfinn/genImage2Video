@@ -8,9 +8,14 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 
 const RouterContext = createContext({ path: '/', navigate: () => {} })
 
-// Trên môi trường dev/local, app được phục vụ dưới /admin (không có subdomain).
-// Cắt tiền tố đó đi để mọi nơi khác trong app chỉ nghĩ bằng đường dẫn "sạch".
-const BASE = '/admin'
+// App phục vụ dưới đường dẫn con /unixstay của video.quanlyhomestay.com — đi
+// chung tunnel Cloudflare sẵn có, khỏi khai báo tên miền phụ mới.
+//
+// Cắt tiền tố đó đi để mọi nơi khác trong app chỉ nghĩ bằng đường dẫn "sạch"
+// (/login, /cleaning…). Nhờ vậy nếu sau này tách sang tên miền riêng và app nằm
+// ở gốc thì không phải sửa một dòng điều hướng nào. Giá trị phải khớp với
+// hkPathPrefix trong backend/server.go.
+const BASE = '/unixstay'
 
 function stripBase(pathname) {
 	if (pathname === BASE) return '/'
