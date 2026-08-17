@@ -1094,3 +1094,24 @@ func TestSamplePhotoReachesOpenSession(t *testing.T) {
 		t.Fatalf("không tìm thấy mục %s trong bản chụp trả về", target)
 	}
 }
+
+// Tên miền phụ nào phục vụ app Dọn dẹp ở gốc đường dẫn.
+func TestIsAdminHost(t *testing.T) {
+	t.Setenv("HK_HOSTS", "donphong.example.com")
+	cases := map[string]bool{
+		"unixstay.quanlyhomestay.com":      true,
+		"unixstay.quanlyhomestay.com:8080": true,
+		"UNIXSTAY.quanlyhomestay.com":      true, // hoa thường không được ảnh hưởng
+		"admin.quanlyhomestay.com":         true, // link cũ vẫn chạy
+		"donphong.example.com":             true, // khai qua HK_HOSTS
+		"video.quanlyhomestay.com":         false,
+		"localhost":                        false,
+	}
+	for host, want := range cases {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Host = host
+		if got := isAdminHost(r); got != want {
+			t.Errorf("%s: muốn %v được %v", host, want, got)
+		}
+	}
+}

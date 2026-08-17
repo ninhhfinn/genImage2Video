@@ -168,15 +168,31 @@ func startWebServer(port int) error {
 // của video.quanlyhomestay.com, khỏi phải khai báo route mới.
 const hkPathPrefix = "/unixstay"
 
-// isAdminHost vẫn nhận tên miền bắt đầu bằng "admin." — giữ lại để sau này muốn
-// tách sang admin.quanlyhomestay.com thì chỉ phải thêm route tunnel, không phải
-// sửa code. Hiện tại không tên miền nào trỏ vào đây nên nhánh này im lặng.
+// hkHostPrefixes — tên miền phụ nào thì phục vụ app Dọn dẹp ở GỐC đường dẫn.
+//
+// unixstay.quanlyhomestay.com là tên miền đang dùng; giữ "admin." để link cũ nếu
+// có vẫn chạy. Thêm tên miền khác bằng biến môi trường HK_HOSTS (ngăn bằng dấu
+// phẩy) — đổi tên miền không phải build lại binary.
+var hkHostPrefixes = []string{"unixstay.", "admin."}
+
 func isAdminHost(r *http.Request) bool {
-	host := r.Host
+	host := strings.ToLower(r.Host)
 	if i := strings.IndexByte(host, ':'); i >= 0 {
 		host = host[:i]
 	}
-	return strings.HasPrefix(strings.ToLower(host), "admin.")
+	for _, p := range hkHostPrefixes {
+		if strings.HasPrefix(host, p) {
+			return true
+		}
+	}
+	// Khớp đúng tên miền đầy đủ khai trong HK_HOSTS.
+	for _, h := range strings.Split(os.Getenv("HK_HOSTS"), ",") {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if h != "" && h == host {
+			return true
+		}
+	}
+	return false
 }
 
 // makeSPAHandler phục vụ một thư mục build của Vite kèm SPA fallback. Trả nil khi
