@@ -254,3 +254,58 @@ func hkTemplateEqual(a, b *HKTemplate) bool {
 	}
 	return true
 }
+
+// hkMergeGuidance trộn phần HƯỚNG DẪN của mẫu sống vào bản chụp mẫu của ca.
+//
+// Bản chụp mẫu tồn tại để sửa checklist không làm hỏng ca đang dở. Nhưng nó gộp
+// nhầm hai thứ khác hẳn nhau:
+//
+//   • ĐIỀU KIỆN HOÀN TẤT — có những mục nào, mỗi mục mấy ảnh. Cái này PHẢI lấy
+//     từ bản chụp: thêm một mục vào mẫu giữa chừng là làm cô đang dọn bỗng thiếu
+//     ảnh cho việc chưa từng tồn tại lúc cô bắt đầu.
+//
+//   • CÁCH GIẢI THÍCH — tên việc, mô tả yêu cầu, ảnh mẫu. Cái này phải lấy từ
+//     mẫu SỐNG: quản lý thêm ảnh mẫu là để cô thấy NGAY, và nó không đổi thứ gì
+//     được tính là hoàn tất. Trước đây ảnh mẫu mới thêm không tới được ca đã tạo,
+//     nên quản lý thêm ảnh xong mà màn của cô vẫn trống.
+//
+// Mục có trong bản chụp mà mẫu sống đã xoá thì giữ nguyên chữ của bản chụp.
+func hkMergeGuidance(snapshot, live *HKTemplate) *HKTemplate {
+	if snapshot == nil {
+		return live
+	}
+	if live == nil {
+		return snapshot
+	}
+
+	guide := map[string]HKItem{}
+	for _, it := range hkFlattenItems(live) {
+		guide[it.ID] = it
+	}
+	groupTitle := map[string]string{}
+	for _, g := range live.Groups {
+		groupTitle[g.ID] = g.Title
+	}
+
+	out := *snapshot
+	out.Groups = make([]HKGroup, 0, len(snapshot.Groups))
+	for _, g := range snapshot.Groups {
+		ng := g
+		if t, ok := groupTitle[g.ID]; ok && t != "" {
+			ng.Title = t
+		}
+		ng.Items = make([]HKItem, 0, len(g.Items))
+		for _, it := range g.Items {
+			if l, ok := guide[it.ID]; ok {
+				if l.Title != "" {
+					it.Title = l.Title
+				}
+				it.Hint = l.Hint
+				it.SamplePhoto = l.SamplePhoto
+			}
+			ng.Items = append(ng.Items, it)
+		}
+		out.Groups = append(out.Groups, ng)
+	}
+	return &out
+}

@@ -378,3 +378,78 @@ func TestNormalizeTemplateNilSafe(t *testing.T) {
 		t.Fatal("nil phải trả nil")
 	}
 }
+
+// ─── Trộn hướng dẫn vào bản chụp mẫu ──────────────────────────────────────
+
+// Ảnh mẫu và mô tả thêm SAU khi ca đã tạo vẫn phải tới được màn của cô: nó chỉ
+// giải thích cách làm, không đổi thứ gì được tính là hoàn tất.
+func TestMergeGuidanceBringsSamplePhotoToOpenSession(t *testing.T) {
+	snapshot := &HKTemplate{Groups: []HKGroup{
+		{ID: "g1", Title: "Phòng ngủ", Items: []HKItem{
+			{ID: "a", Title: "Thay ga", MinPhotos: 1},
+		}},
+	}}
+	live := &HKTemplate{Groups: []HKGroup{
+		{ID: "g1", Title: "Phòng ngủ (đổi tên)", Items: []HKItem{
+			{ID: "a", Title: "Thay ga gối mới", MinPhotos: 3, Hint: "Thấy cả 4 góc", SamplePhoto: "/api/hk/photo/mau.jpg"},
+		}},
+	}}
+
+	out := hkMergeGuidance(snapshot, live)
+	it := hkFlattenItems(out)[0]
+
+	if it.SamplePhoto != "/api/hk/photo/mau.jpg" {
+		t.Fatalf("ảnh mẫu mới phải tới được ca đang dở, được %q", it.SamplePhoto)
+	}
+	if it.Hint != "Thấy cả 4 góc" {
+		t.Fatalf("mô tả yêu cầu phải cập nhật, được %q", it.Hint)
+	}
+	if it.Title != "Thay ga gối mới" {
+		t.Fatalf("tên việc phải cập nhật, được %q", it.Title)
+	}
+	// Nhưng SỐ ẢNH thì giữ theo bản chụp: đổi từ 1 lên 3 giữa chừng là làm cô
+	// đang dọn bỗng thiếu ảnh cho yêu cầu chưa tồn tại lúc cô bắt đầu.
+	if it.MinPhotos != 1 {
+		t.Fatalf("số ảnh phải giữ theo bản chụp (1), được %d", it.MinPhotos)
+	}
+}
+
+// Mẫu sống thêm mục mới KHÔNG được chen vào ca đang dở.
+func TestMergeGuidanceDoesNotAddNewItems(t *testing.T) {
+	snapshot := &HKTemplate{Groups: []HKGroup{
+		{ID: "g1", Items: []HKItem{{ID: "a", Title: "Việc cũ", MinPhotos: 1}}},
+	}}
+	live := &HKTemplate{Groups: []HKGroup{
+		{ID: "g1", Items: []HKItem{
+			{ID: "a", Title: "Việc cũ", MinPhotos: 1},
+			{ID: "b", Title: "Việc mới thêm", MinPhotos: 1},
+		}},
+		{ID: "g2", Items: []HKItem{{ID: "c", Title: "Nhóm mới", MinPhotos: 1}}},
+	}}
+	if got := len(hkFlattenItems(hkMergeGuidance(snapshot, live))); got != 1 {
+		t.Fatalf("ca đang dở phải giữ đúng 1 mục, được %d", got)
+	}
+}
+
+// Mục bị xoá khỏi mẫu sống thì giữ nguyên chữ của bản chụp, không thành trống.
+func TestMergeGuidanceKeepsTextForRemovedItem(t *testing.T) {
+	snapshot := &HKTemplate{Groups: []HKGroup{
+		{ID: "g1", Items: []HKItem{{ID: "a", Title: "Việc đã gỡ khỏi mẫu", Hint: "Mô tả cũ", MinPhotos: 1}}},
+	}}
+	live := &HKTemplate{Groups: []HKGroup{{ID: "g1", Items: []HKItem{}}}}
+	it := hkFlattenItems(hkMergeGuidance(snapshot, live))[0]
+	if it.Title != "Việc đã gỡ khỏi mẫu" || it.Hint != "Mô tả cũ" {
+		t.Fatalf("phải giữ chữ của bản chụp: %+v", it)
+	}
+}
+
+func TestMergeGuidanceNilSafe(t *testing.T) {
+	live := &HKTemplate{Groups: []HKGroup{{ID: "g", Items: []HKItem{{ID: "a"}}}}}
+	if hkMergeGuidance(nil, live) != live {
+		t.Fatal("không có bản chụp thì dùng mẫu sống")
+	}
+	snap := &HKTemplate{Groups: []HKGroup{{ID: "g", Items: []HKItem{{ID: "a"}}}}}
+	if hkMergeGuidance(snap, nil) != snap {
+		t.Fatal("không có mẫu sống thì giữ bản chụp")
+	}
+}

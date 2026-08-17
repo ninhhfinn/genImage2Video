@@ -1050,3 +1050,47 @@ func TestSamplePhotoSurvivesSave(t *testing.T) {
 		t.Fatalf("mô tả yêu cầu phải được giữ: %q", items[0].Hint)
 	}
 }
+
+// Ảnh mẫu quản lý thêm SAU khi ca đã tạo phải tới được màn chụp của cô.
+//
+// Lỗi gặp thật: hàm trộn hướng dẫn chạy đúng, nhưng JSON trả về vẫn là bản chụp
+// THÔ từ DB — mà màn chụp đọc chính trường đó. Quản lý thêm ảnh mẫu xong, màn
+// của cô vẫn trống. Test này đi qua đúng endpoint mà màn chụp gọi.
+func TestSamplePhotoReachesOpenSession(t *testing.T) {
+	e := newHKTestEnv(t)
+	sess := e.createSession(today())
+
+	// Sau khi ca đã tạo, quản lý mới gắn ảnh mẫu vào mẫu mà ca đang dùng.
+	tpl, err := e.app.store.TemplateByID("hkt_studio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := tpl.Groups[0].Items[0].ID
+	tpl.Groups[0].Items[0].SamplePhoto = "/api/hk/photo/mau.jpg"
+	tpl.Groups[0].Items[0].Hint = "Thấy cả 4 góc"
+	if w := e.do("POST", "/api/hk/templates", e.adminToken, tpl); w.Code != 200 {
+		t.Fatalf("lưu mẫu hỏng: %s", w.Body.String())
+	}
+
+	var out struct {
+		Session HKSessionView `json:"session"`
+	}
+	e.decode(e.do("GET", "/api/hk/sessions/get?id="+sess.ID, e.adminToken, nil), &out)
+
+	found := false
+	for _, it := range hkFlattenItems(out.Session.TemplateSnapshot) {
+		if it.ID != target {
+			continue
+		}
+		found = true
+		if it.SamplePhoto != "/api/hk/photo/mau.jpg" {
+			t.Fatalf("ảnh mẫu phải có trong dữ liệu màn chụp đọc, được %q", it.SamplePhoto)
+		}
+		if it.Hint != "Thấy cả 4 góc" {
+			t.Fatalf("mô tả yêu cầu phải cập nhật, được %q", it.Hint)
+		}
+	}
+	if !found {
+		t.Fatalf("không tìm thấy mục %s trong bản chụp trả về", target)
+	}
+}

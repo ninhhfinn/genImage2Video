@@ -133,7 +133,11 @@ func (a *HKApp) hkBuildViews(sessions []HKSession) ([]HKSessionView, error) {
 		if t, ok := tplByID[s.TemplateID]; ok {
 			live = &t
 		}
-		tpl := hkTemplateFor(&s, live)
+		// Trộn hướng dẫn của mẫu sống vào bản chụp, rồi TRẢ LUÔN bản đã trộn ra
+		// JSON — màn chụp của cô đọc `template_snapshot`, nên nếu chỉ trộn để tính
+		// tiến độ thì ảnh mẫu quản lý vừa thêm không bao giờ tới được màn của cô.
+		tpl := hkNormalizeTemplate(hkMergeGuidance(hkTemplateFor(&s, live), live))
+		s.TemplateSnapshot = tpl
 		s.Status = hkDeriveStatus(&s, tpl)
 
 		v := HKSessionView{
@@ -704,7 +708,8 @@ func (a *HKApp) hkTemplateOf(sess *HKSession) *HKTemplate {
 			live = &t
 		}
 	}
-	return hkNormalizeTemplate(hkTemplateFor(sess, live))
+	// Điều kiện hoàn tất lấy từ bản chụp, cách giải thích lấy từ mẫu sống.
+	return hkNormalizeTemplate(hkMergeGuidance(hkTemplateFor(sess, live), live))
 }
 
 // handleSessionNote — cô báo hỏng hóc / thiếu đồ.
