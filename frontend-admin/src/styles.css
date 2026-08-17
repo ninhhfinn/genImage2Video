@@ -2190,3 +2190,253 @@ tbody tr:last-child td {
 	font-size: 12px;
 	color: var(--muted);
 }
+
+/* ─── Báo vấn đề ──────────────────────────────────────────────────────── */
+
+.cap-report-inline {
+	background: none;
+	border: 0;
+	color: var(--muted);
+	font: inherit;
+	font-size: 13.5px;
+	min-height: 44px;
+	cursor: pointer;
+}
+
+.cap-note--ok {
+	background: var(--ok-bg);
+	color: var(--ok);
+}
+
+.issue-form {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+/* Loại vấn đề là nút to bấm một chạm, không phải danh sách xổ: người đang đứng
+   trong phòng cầm điện thoại một tay. */
+.cat-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+	gap: 8px;
+}
+
+.cat {
+	min-height: 52px;
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: var(--card);
+	font: inherit;
+	font-size: 13.5px;
+	line-height: 1.3;
+	text-align: left;
+	cursor: pointer;
+}
+
+.cat.active {
+	border-color: var(--primary);
+	background: rgba(29, 78, 216, 0.08);
+	color: var(--primary);
+	font-weight: 600;
+}
+
+.urg-row {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.urg {
+	flex: 1 1 160px;
+	min-height: 48px;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: var(--card);
+	font: inherit;
+	font-size: 14px;
+	cursor: pointer;
+}
+
+.urg--on-urgent {
+	border-color: var(--danger);
+	background: var(--danger-bg);
+	color: var(--danger);
+	font-weight: 700;
+}
+
+.urg--on-normal {
+	border-color: var(--primary);
+	background: rgba(29, 78, 216, 0.08);
+	color: var(--primary);
+	font-weight: 600;
+}
+
+.issue-form textarea {
+	width: 100%;
+	resize: vertical;
+	font-size: 16px;
+	border-radius: 12px;
+	padding: 10px 12px;
+}
+
+/* ─── Danh sách việc cần xử lý ────────────────────────────────────────── */
+
+.issues {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.issue {
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-left-width: 4px;
+	border-radius: 12px;
+	overflow: hidden;
+}
+
+/* Quá hạn tô đỏ, khẩn tô cam: mở danh sách ra là mắt bắt được ngay chỗ cần làm
+   trước, không phải đọc từng dòng. */
+.issue--urgent {
+	border-left-color: var(--warn);
+}
+.issue--overdue {
+	border-left-color: var(--danger);
+	background: var(--danger-bg);
+}
+
+.issue-head {
+	width: 100%;
+	display: flex;
+	gap: 12px;
+	padding: 12px 14px;
+	background: none;
+	border: 0;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+	align-items: flex-start;
+}
+
+.issue-main {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.issue-title {
+	font-weight: 700;
+	font-size: 14.5px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.issue-flag {
+	background: var(--danger);
+	color: #fff;
+	font-size: 10.5px;
+	font-weight: 800;
+	padding: 2px 7px;
+	border-radius: 5px;
+	letter-spacing: 0.04em;
+}
+
+.issue-room {
+	font-size: 12.5px;
+	color: var(--muted);
+	margin-top: 2px;
+}
+
+.issue-desc {
+	font-size: 13.5px;
+	margin-top: 5px;
+	line-height: 1.45;
+}
+
+.issue-side {
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 4px;
+	font-size: 12px;
+}
+
+.issue-deadline {
+	color: var(--muted);
+	font-size: 12px;
+}
+
+.issue-body {
+	border-top: 1px solid var(--border);
+	padding: 12px 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.issue-actions {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	align-items: center;
+}
+
+.issue-actions .btn + .btn {
+	margin-left: 0;
+}
+
+.issue-resolved {
+	background: var(--ok-bg);
+	color: var(--ok);
+	border-radius: 10px;
+	padding: 10px 12px;
+	font-size: 13.5px;
+}
+
+.resolve-box {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	flex: 1 1 100%;
+}
+
+.resolve-box input {
+	flex: 1 1 200px;
+}
+
+/* ─── Màn của nhân sự kỹ thuật ────────────────────────────────────────── */
+/* Họ là người đi hiện trường, chủ yếu dùng điện thoại. */
+
+.handler {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	background: var(--bg);
+	overflow: hidden;
+}
+
+.handler-body {
+	flex: 1 1 auto;
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+	padding: 12px 12px 28px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+@media (max-width: 700px) {
+	.issue-head {
+		flex-direction: column;
+		gap: 6px;
+	}
+	.issue-side {
+		flex-direction: row;
+		align-items: center;
+		flex-wrap: wrap;
+	}
+}

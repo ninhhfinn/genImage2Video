@@ -112,6 +112,13 @@ export const api = {
 	saveItem: (id, itemId, patch) => post('/api/hk/sessions/item', { id, item_id: itemId, ...patch }),
 	submitSession: (id) => post('/api/hk/sessions/submit', { id }),
 	reportIssue: (id, note) => post('/api/hk/sessions/note', { id, note }),
+
+	issues: (query = '') => get('/api/hk/issues' + (query ? '?' + query : '')),
+	createIssue: (payload) => post('/api/hk/issues/create', payload),
+	claimIssue: (id, deadlineAt) => post('/api/hk/issues/claim', { id, deadline_at: deadlineAt }),
+	assignIssue: (payload) => post('/api/hk/issues/assign', payload),
+	resolveIssue: (payload) => post('/api/hk/issues/resolve', payload),
+	setStaffRole: (id, role) => post('/api/hk/staffs/role', { id, role }),
 	assignSession: (id, staffId) => post('/api/hk/sessions/assign', { id, staff_id: staffId }),
 	reviewSession: (payload) => post('/api/hk/sessions/review', payload),
 

@@ -163,6 +163,27 @@ func (s *HKStore) migrate() error {
 			PRIMARY KEY (room_id, day)
 		)`,
 		`CREATE INDEX IF NOT EXISTS hk_revenue_day ON hk_revenue(day)`,
+		`CREATE TABLE IF NOT EXISTS hk_issue (
+			id TEXT PRIMARY KEY,
+			room_id TEXT NOT NULL DEFAULT '',
+			session_id TEXT NOT NULL DEFAULT '',
+			reporter_id TEXT NOT NULL DEFAULT '',
+			category TEXT NOT NULL DEFAULT '',
+			urgency TEXT NOT NULL DEFAULT 'normal',
+			description TEXT NOT NULL DEFAULT '',
+			photos TEXT NOT NULL DEFAULT '[]',
+			status TEXT NOT NULL DEFAULT 'open',
+			assignee_id TEXT NOT NULL DEFAULT '',
+			deadline_at INTEGER NOT NULL DEFAULT 0,
+			resolve_note TEXT NOT NULL DEFAULT '',
+			resolve_photos TEXT NOT NULL DEFAULT '[]',
+			created_at INTEGER NOT NULL DEFAULT 0,
+			assigned_at INTEGER NOT NULL DEFAULT 0,
+			resolved_at INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE INDEX IF NOT EXISTS hk_issue_status ON hk_issue(status)`,
+		`CREATE INDEX IF NOT EXISTS hk_issue_assignee ON hk_issue(assignee_id)`,
+		`CREATE INDEX IF NOT EXISTS hk_issue_created ON hk_issue(created_at)`,
 		// Một phòng chỉ có một ca mỗi ngày — chặn ở tầng DB để job đồng bộ chạy hai
 		// lần không đẻ ra hai ca, kéo theo trả tiền hai lần.
 		// Khoá chống trùng là MÃ LƯỢT ĐẶT, không phải (phòng, ngày): 59/60 phòng
@@ -947,4 +968,119 @@ func (s *HKStore) LastRevenueSync() int64 {
 	var n int64
 	s.db.QueryRow(`SELECT COALESCE(MAX(synced_at), 0) FROM hk_revenue`).Scan(&n)
 	return n
+}
+
+// ─── Vấn đề cần xử lý ─────────────────────────────────────────────────────
+
+const issueCols = `id, room_id, session_id, reporter_id, category, urgency, description, photos,
+	status, assignee_id, deadline_at, resolve_note, resolve_photos, created_at, assigned_at, resolved_at`
+
+func scanIssue(row interface{ Scan(...interface{}) error }) (HKIssue, error) {
+	var i HKIssue
+	var photos, resolvePhotos string
+	err := row.Scan(&i.ID, &i.RoomID, &i.SessionID, &i.ReporterID, &i.Category, &i.Urgency,
+		&i.Description, &photos, &i.Status, &i.AssigneeID, &i.DeadlineAt,
+		&i.ResolveNote, &resolvePhotos, &i.CreatedAt, &i.AssignedAt, &i.ResolvedAt)
+	if err != nil {
+		return i, err
+	}
+	json.Unmarshal([]byte(photos), &i.Photos)
+	json.Unmarshal([]byte(resolvePhotos), &i.ResolvePhotos)
+	if i.Photos == nil {
+		i.Photos = []HKPhoto{}
+	}
+	if i.ResolvePhotos == nil {
+		i.ResolvePhotos = []HKPhoto{}
+	}
+	return i, nil
+}
+
+func (s *HKStore) InsertIssue(i HKIssue) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`INSERT INTO hk_issue (`+issueCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		i.ID, i.RoomID, i.SessionID, i.ReporterID, i.Category, i.Urgency, i.Description,
+		jsonMarshalString(i.Photos), i.Status, i.AssigneeID, i.DeadlineAt,
+		i.ResolveNote, jsonMarshalString(i.ResolvePhotos), i.CreatedAt, i.AssignedAt, i.ResolvedAt)
+	return err
+}
+
+func (s *HKStore) UpdateIssue(i HKIssue) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`
+		UPDATE hk_issue SET status=?, assignee_id=?, deadline_at=?, urgency=?,
+			resolve_note=?, resolve_photos=?, assigned_at=?, resolved_at=?
+		WHERE id=?`,
+		i.Status, i.AssigneeID, i.DeadlineAt, i.Urgency,
+		i.ResolveNote, jsonMarshalString(i.ResolvePhotos), i.AssignedAt, i.ResolvedAt, i.ID)
+	return err
+}
+
+func (s *HKStore) IssueByID(id string) (HKIssue, error) {
+	return scanIssue(s.db.QueryRow(`SELECT `+issueCols+` FROM hk_issue WHERE id = ?`, id))
+}
+
+type HKIssueFilter struct {
+	Status     string
+	AssigneeID string
+	ReporterID string
+	RoomID     string
+	Urgency    string
+	From       int64
+	To         int64
+	// OpenOnly: chỉ việc chưa đóng — dùng cho màn "việc cần làm".
+	OpenOnly bool
+}
+
+func (s *HKStore) ListIssues(f HKIssueFilter) ([]HKIssue, error) {
+	q := `SELECT ` + issueCols + ` FROM hk_issue WHERE 1=1`
+	var args []interface{}
+	if f.Status != "" {
+		q += ` AND status = ?`
+		args = append(args, f.Status)
+	}
+	if f.OpenOnly {
+		q += ` AND status IN ('open','assigned')`
+	}
+	if f.AssigneeID != "" {
+		q += ` AND assignee_id = ?`
+		args = append(args, f.AssigneeID)
+	}
+	if f.ReporterID != "" {
+		q += ` AND reporter_id = ?`
+		args = append(args, f.ReporterID)
+	}
+	if f.RoomID != "" {
+		q += ` AND room_id = ?`
+		args = append(args, f.RoomID)
+	}
+	if f.Urgency != "" {
+		q += ` AND urgency = ?`
+		args = append(args, f.Urgency)
+	}
+	if f.From > 0 {
+		q += ` AND created_at >= ?`
+		args = append(args, f.From)
+	}
+	if f.To > 0 {
+		q += ` AND created_at <= ?`
+		args = append(args, f.To)
+	}
+	q += ` ORDER BY created_at DESC`
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HKIssue{}
+	for rows.Next() {
+		i, err := scanIssue(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, rows.Err()
 }

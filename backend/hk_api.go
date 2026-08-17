@@ -301,12 +301,20 @@ func (a *HKApp) handleStaffs(w http.ResponseWriter, r *http.Request) {
 		hkFailAuth(w, err)
 		return
 	}
-	users, err := a.store.ListUsers(HKRoleCleaner)
+	// Trả cả cô dọn dẹp lẫn kỹ thuật: quản lý cần thấy đủ để giao việc, và màn
+	// nhân sự là một danh sách chứ không phải hai.
+	users, err := a.store.ListUsers("")
 	if err != nil {
 		hkFail(w, http.StatusInternalServerError, "Không đọc được danh sách.")
 		return
 	}
-	hkWriteJSON(w, http.StatusOK, map[string]interface{}{"staffs": users})
+	staffs := make([]HKUser, 0, len(users))
+	for _, u := range users {
+		if u.Role != HKRoleAdmin {
+			staffs = append(staffs, u)
+		}
+	}
+	hkWriteJSON(w, http.StatusOK, map[string]interface{}{"staffs": staffs})
 }
 
 func (a *HKApp) handleStaffReview(w http.ResponseWriter, r *http.Request) {
@@ -1083,6 +1091,13 @@ func (a *HKApp) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("/api/hk/staffs", a.handleStaffs)
 	mux.HandleFunc("/api/hk/staffs/review", a.handleStaffReview)
+	mux.HandleFunc("/api/hk/staffs/role", a.handleStaffRole)
+
+	mux.HandleFunc("/api/hk/issues", a.handleIssues)
+	mux.HandleFunc("/api/hk/issues/create", a.handleIssueCreate)
+	mux.HandleFunc("/api/hk/issues/claim", a.handleIssueClaim)
+	mux.HandleFunc("/api/hk/issues/assign", a.handleIssueAssign)
+	mux.HandleFunc("/api/hk/issues/resolve", a.handleIssueResolve)
 
 	mux.HandleFunc("/api/hk/rooms", a.handleRooms)
 	mux.HandleFunc("/api/hk/rooms/sync", a.handleRoomsSync)

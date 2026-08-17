@@ -10,7 +10,9 @@ import { RouterProvider, matchPath, useRouter } from './router.jsx'
 import { LoginPage, RegisterPage } from './LoginPage.jsx'
 import { Spinner } from './components/ui.jsx'
 import { CleanerMePage, CleanerSessionPage, CleanerTodayPage } from './cleaner/CleanerPages.jsx'
+import { HandlerPage } from './IssuesPage.jsx'
 import {
+	AdminIssuesPage,
 	BoardPage,
 	ChecklistPage,
 	ReportPage,
@@ -36,7 +38,7 @@ function Routes() {
 			return
 		}
 		if (user && isPublic) {
-			navigate(isAdmin(user) ? '/' : '/cleaning', { replace: true })
+			navigate(isAdmin(user) ? '/' : user.role === 'handler' ? '/issues' : '/cleaning', { replace: true })
 		}
 	}, [user, loading, path, navigate])
 
@@ -52,6 +54,9 @@ function Routes() {
 	if (path === '/cleaning/me') return <CleanerMePage />
 	if (path === '/cleaning') return <CleanerTodayPage />
 
+	// Kỹ thuật có màn riêng: họ không thấy ca dọn hay doanh thu.
+	if (user.role === 'handler') return <HandlerPage />
+
 	// Cô dọn dẹp gõ tay URL của quản lý → đẩy về ca hôm nay.
 	if (!isAdmin(user)) {
 		return <Redirect to="/cleaning" />
@@ -60,6 +65,7 @@ function Routes() {
 	// ── Màn quản lý ──
 	const adminSession = matchPath('/sessions/:id', path)
 	if (adminSession) return <SessionDetailPage sessionId={adminSession.id} />
+	if (path === '/issues') return <AdminIssuesPage />
 	if (path === '/review') return <ReviewPage />
 	if (path === '/report') return <ReportPage />
 	if (path === '/reviews') return <ReviewsPage />

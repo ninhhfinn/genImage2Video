@@ -22,7 +22,7 @@ export function LoginPage() {
 		setBusy(true)
 		try {
 			const user = await login(phone.trim(), password)
-			navigate(user.role === 'admin' ? '/' : '/cleaning', { replace: true })
+			navigate(user.role === 'admin' ? '/' : user.role === 'handler' ? '/issues' : '/cleaning', { replace: true })
 		} catch (e2) {
 			setErr(e2.message)
 		} finally {

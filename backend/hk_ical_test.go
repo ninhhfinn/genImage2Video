@@ -499,3 +499,98 @@ func TestFilterListingsKeepsAllWhenNoOwner(t *testing.T) {
 		t.Fatalf("không có ownerID thì giữ nguyên, được %d", got)
 	}
 }
+
+// ─── Vấn đề cần xử lý ─────────────────────────────────────────────────────
+
+func TestSuggestDeadline(t *testing.T) {
+	loc := time.Local
+	// Khẩn báo lúc 9h sáng → hạn cuối ngày hôm đó.
+	morning := time.Date(2026, 8, 17, 9, 0, 0, 0, loc)
+	d := time.UnixMilli(hkSuggestDeadline(HKUrgencyUrgent, morning)).In(loc)
+	if d.Day() != 17 || d.Hour() != 21 {
+		t.Fatalf("khẩn buổi sáng → 21h cùng ngày, được %s", d.Format("02/01 15:04"))
+	}
+	// Khẩn báo lúc 23h → hạn KHÔNG được là một mốc đã trôi qua.
+	night := time.Date(2026, 8, 17, 23, 0, 0, 0, loc)
+	d = time.UnixMilli(hkSuggestDeadline(HKUrgencyUrgent, night)).In(loc)
+	if !d.After(night) {
+		t.Fatalf("hạn phải nằm sau lúc báo, được %s", d.Format("02/01 15:04"))
+	}
+	// Bình thường → 3 ngày sau.
+	d = time.UnixMilli(hkSuggestDeadline(HKUrgencyNormal, morning)).In(loc)
+	if d.Day() != 20 {
+		t.Fatalf("bình thường → 3 ngày sau (20/08), được %s", d.Format("02/01"))
+	}
+}
+
+func TestIssueOverdue(t *testing.T) {
+	now := int64(1_000_000)
+	past := &HKIssue{DeadlineAt: now - 1, Status: HKIssueAssigned}
+	if !hkIssueOverdue(past, now) {
+		t.Fatal("quá hạn mà chưa xong phải tính là trễ")
+	}
+	// Đóng muộn vẫn là đóng — gắn cờ đỏ vĩnh viễn chỉ làm nhiễu danh sách.
+	done := &HKIssue{DeadlineAt: now - 1, Status: HKIssueDone}
+	if hkIssueOverdue(done, now) {
+		t.Fatal("việc đã xong không còn tính quá hạn")
+	}
+	if hkIssueOverdue(&HKIssue{DeadlineAt: 0, Status: HKIssueOpen}, now) {
+		t.Fatal("không có hạn thì không quá hạn")
+	}
+}
+
+func TestSummarizeIssues(t *testing.T) {
+	now := time.Now()
+	nowMs := now.UnixMilli()
+	list := []HKIssue{
+		{Status: HKIssueOpen, Urgency: HKUrgencyUrgent, CreatedAt: nowMs, DeadlineAt: nowMs - 1},
+		{Status: HKIssueAssigned, Urgency: HKUrgencyNormal, CreatedAt: nowMs},
+		{Status: HKIssueDone, Urgency: HKUrgencyUrgent, CreatedAt: nowMs - 86400000, ResolvedAt: nowMs, DeadlineAt: nowMs - 1},
+	}
+	s := hkSummarizeIssues(list, now)
+	if s.Total != 3 || s.Open != 1 || s.Assigned != 1 || s.Done != 1 {
+		t.Fatalf("%+v", s)
+	}
+	if s.Overdue != 1 {
+		t.Fatalf("chỉ việc chưa xong mới tính quá hạn, được %d", s.Overdue)
+	}
+	// Khẩn ĐÃ xử lý xong là chuyện tốt, không đáng báo động.
+	if s.Urgent != 1 {
+		t.Fatalf("chỉ đếm khẩn chưa xong, được %d", s.Urgent)
+	}
+	if s.NewToday != 2 || s.DoneToday != 1 {
+		t.Fatalf("đếm theo ngày sai: %+v", s)
+	}
+}
+
+// Danh sách phải sắp theo mức cấp thiết, không theo thời gian báo: người mở ra
+// là để biết phải làm gì trước.
+func TestSortIssues(t *testing.T) {
+	now := int64(1_000_000)
+	list := []HKIssue{
+		{ID: "xong", Status: HKIssueDone},
+		{ID: "thuong", Status: HKIssueOpen, Urgency: HKUrgencyNormal, DeadlineAt: now + 100000},
+		{ID: "khan", Status: HKIssueOpen, Urgency: HKUrgencyUrgent, DeadlineAt: now + 50000},
+		{ID: "tre", Status: HKIssueAssigned, Urgency: HKUrgencyNormal, DeadlineAt: now - 1},
+	}
+	hkSortIssues(list, now)
+	want := []string{"tre", "khan", "thuong", "xong"}
+	for i, id := range want {
+		if list[i].ID != id {
+			t.Fatalf("thứ tự sai: muốn %v, được %v", want, []string{list[0].ID, list[1].ID, list[2].ID, list[3].ID})
+		}
+	}
+}
+
+// Việc chưa có hạn xếp SAU việc có hạn, không lên đầu vì số 0.
+func TestSortIssuesNoDeadlineLast(t *testing.T) {
+	now := int64(1_000_000)
+	list := []HKIssue{
+		{ID: "khong-han", Status: HKIssueOpen, DeadlineAt: 0},
+		{ID: "co-han", Status: HKIssueOpen, DeadlineAt: now + 1000},
+	}
+	hkSortIssues(list, now)
+	if list[0].ID != "co-han" {
+		t.Fatalf("việc có hạn phải lên trước, được %s", list[0].ID)
+	}
+}

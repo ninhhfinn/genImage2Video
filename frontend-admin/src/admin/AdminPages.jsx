@@ -8,10 +8,12 @@ import { Link, useRouter } from '../router.jsx'
 import { Alert, Empty, Progress, SessionBadge, Spinner, StaffBadge, Stat } from '../components/ui.jsx'
 import { ROOM_TYPE_LABEL, dayKey, dayLabel, dayMonth, hour, minutes, money, shiftDay, shortMoney } from '../format.js'
 import { ReviewFilters, defaultReviewFilter, reviewQuery } from '../components/ReviewFilters.jsx'
+import { IssuesBoard } from '../IssuesPage.jsx'
 
 const TABS = [
 	{ key: 'board', label: 'Ca dọn', icon: '📋', to: '/' },
 	{ key: 'review', label: 'Duyệt ảnh', icon: '✅', to: '/review' },
+	{ key: 'issues', label: 'Vấn đề', icon: '🔧', to: '/issues' },
 	{ key: 'report', label: 'Báo cáo', icon: '📊', to: '/report' },
 	{ key: 'reviews', label: 'Đánh giá khách', icon: '⭐', to: '/reviews' },
 	{ key: 'revenue', label: 'Doanh thu', icon: '💰', to: '/revenue' },
@@ -974,6 +976,23 @@ export function RevenuePage() {
 	)
 }
 
+export function AdminIssuesPage() {
+	return (
+		<AdminShell active="issues">
+			<div className="page-head">
+				<div>
+					<h1>Vấn đề cần xử lý</h1>
+					<p className="sub">
+						Cô dọn dẹp báo khi phát hiện hỏng hóc; kỹ thuật tự nhận hoặc bạn giao. Danh sách sắp theo mức cấp thiết:
+						quá hạn trước, rồi khẩn, rồi hạn gần nhất.
+					</p>
+				</div>
+			</div>
+			<IssuesBoard role="admin" showReport />
+		</AdminShell>
+	)
+}
+
 // ─── Nhân sự ──────────────────────────────────────────────────────────────
 
 export function StaffPage() {
@@ -1052,6 +1071,24 @@ export function StaffPage() {
 									<td className="nowrap">{s.phone}</td>
 									<td>{(s.zones || []).join(', ') || '—'}</td>
 									<td>{s.note || '—'}</td>
+									<td>
+										{/* Đổi vai ngay tại bảng: nhân sự kỹ thuật thường đăng ký như cô dọn
+										    dẹp rồi mới được phân vai. */}
+										<select
+											value={s.role}
+											onChange={async (e) => {
+												try {
+													const d = await api.setStaffRole(s.id, e.target.value)
+													setStaffs((list) => list.map((x) => (x.id === s.id ? d.staff : x)))
+												} catch (e2) {
+													setErr(e2.message)
+												}
+											}}
+										>
+											<option value="cleaner">Cô dọn dẹp</option>
+											<option value="handler">Kỹ thuật</option>
+										</select>
+									</td>
 									<td><StaffBadge status={s.status} /></td>
 									<td className="nowrap">
 										{s.status === 'pending' ? (

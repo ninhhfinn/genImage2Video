@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, photoSrc } from '../api.js'
 import { minutes } from '../format.js'
+import IssueForm from '../components/IssueForm.jsx'
 
 const ACCEPT = 'image/png,image/jpeg,image/webp'
 const MAX_EDGE = 1600
@@ -80,7 +81,8 @@ export default function CaptureFlow({ session, onSessionChange, onExit }) {
 	// ảnh, 'done' đã xong. Trước đó tôi suy màn từ idx và nút "Xem lại" rơi ngược
 	// vào màn Xong.
 	const [view, setView] = useState('shoot')
-	const [note, setNote] = useState('')
+	const [reporting, setReporting] = useState(false)
+	const [reported, setReported] = useState(0)
 	// Ảnh mẫu phóng to — cô xem kỹ rồi đóng, không rời màn chụp.
 	const [zoomSample, setZoomSample] = useState('')
 	const fileRef = useRef(null)
@@ -166,6 +168,25 @@ export default function CaptureFlow({ session, onSessionChange, onExit }) {
 	const failed = Object.values(shots).flat().filter((s) => s.state === 'failed').length
 	const allDone = items.length > 0 && items.every(isDone)
 
+	// Modal báo vấn đề dùng ở CẢ màn chụp lẫn màn xong — nút bấm nằm ở màn xong
+	// nên nếu chỉ đặt trong màn chụp thì bấm không hiện gì.
+	const issueModal = reporting && (
+		<div className="modal" onClick={() => setReporting(false)}>
+			<div className="modal-in" onClick={(e) => e.stopPropagation()}>
+				<h2>Báo vấn đề — {session.room?.name}</h2>
+				<IssueForm
+					roomId={session.room_id}
+					sessionId={session.id}
+					onCancel={() => setReporting(false)}
+					onDone={() => {
+						setReporting(false)
+						setReported((n) => n + 1)
+					}}
+				/>
+			</div>
+		</div>
+	)
+
 	// ─── Màn xong ───────────────────────────────────────────────────────────
 	if (view === 'done') {
 		return (
@@ -197,18 +218,20 @@ export default function CaptureFlow({ session, onSessionChange, onExit }) {
 					Xem lại ảnh đã chụp
 				</button>
 
-				{/* Báo hỏng hóc nằm NGOÀI luồng chụp — nó không phải một mục checklist,
+				{/* Báo vấn đề nằm NGOÀI luồng chụp — nó không phải một mục checklist,
 				    và bắt cô đi qua nó mỗi ca chỉ để bấm "không có gì" là thêm một chạm
-				    vô ích cho 95% số ca. */}
+				    vô ích cho phần lớn số ca. */}
 				<div className="cap-report">
-					<label>Có gì hỏng hoặc thiếu đồ? (không bắt buộc)</label>
-					<input
-						placeholder="VD: vòi sen rỉ nước, thiếu 1 khăn tắm"
-						value={note}
-						onChange={(e) => setNote(e.target.value)}
-						onBlur={() => note.trim() && api.reportIssue(session.id, note).catch(() => {})}
-					/>
+					{reported > 0 && (
+						<div className="cap-note cap-note--ok">
+							Đã gửi {reported} vấn đề. Quản lý và kỹ thuật thấy ngay.
+						</div>
+					)}
+					<button className="cap-link" onClick={() => setReporting(true)}>
+						🔧 Báo phòng có vấn đề
+					</button>
 				</div>
+				{issueModal}
 			</div>
 		)
 	}
@@ -300,6 +323,13 @@ export default function CaptureFlow({ session, onSessionChange, onExit }) {
 			</button>
 
 			<input ref={fileRef} type="file" accept={ACCEPT} capture="environment" hidden onChange={onPick} />
+
+			{/* Phát hiện hỏng hóc giữa chừng thì báo ngay, không phải nhớ tới cuối ca. */}
+			<button className="cap-report-inline" onClick={() => setReporting(true)}>
+				🔧 Phòng có vấn đề?
+			</button>
+
+			{issueModal}
 
 			{zoomSample && (
 				<div className="lightbox" onClick={() => setZoomSample('')}>

@@ -1218,3 +1218,224 @@ func TestRevenueSyncSaysWhenTokenMissing(t *testing.T) {
 		t.Fatalf("thông báo phải nhắc tới token: %s", w.Body.String())
 	}
 }
+
+// ─── Vấn đề: phân quyền ba vai ────────────────────────────────────────────
+
+// makeHandler tạo một tài khoản kỹ thuật và trả token.
+func (e *hkTestEnv) makeHandler(t *testing.T, name, phone string) (string, string) {
+	t.Helper()
+	id := e.registerAndApprove(name, phone, "123456", "Cầu Giấy")
+	if w := e.do("POST", "/api/hk/staffs/role", e.adminToken, map[string]string{
+		"id": id, "role": HKRoleHandler,
+	}); w.Code != 200 {
+		t.Fatalf("đổi vai hỏng (%d): %s", w.Code, w.Body.String())
+	}
+	return id, e.login(phone, "123456")
+}
+
+func (e *hkTestEnv) reportIssue(t *testing.T, token, urgency string) HKIssueView {
+	t.Helper()
+	w := e.do("POST", "/api/hk/issues/create", token, map[string]interface{}{
+		"room_id": e.roomID, "category": "dien_nuoc", "urgency": urgency,
+		"description": "Vòi sen rỉ nước liên tục",
+	})
+	if w.Code != 200 {
+		t.Fatalf("báo vấn đề hỏng (%d): %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Issue HKIssueView `json:"issue"`
+	}
+	e.decode(w, &out)
+	return out.Issue
+}
+
+func TestIssueReportAndAutoDeadline(t *testing.T) {
+	e := newHKTestEnv(t)
+	iss := e.reportIssue(t, e.lanToken, HKUrgencyUrgent)
+	if iss.Status != HKIssueOpen {
+		t.Fatalf("vấn đề mới phải ở trạng thái chờ nhận, được %s", iss.Status)
+	}
+	if iss.DeadlineAt <= 0 {
+		t.Fatal("phải tự gợi ý hạn xử lý")
+	}
+	if iss.RoomCode == "" || iss.CategoryText == "" {
+		t.Fatalf("view phải kèm tên phòng và loại vấn đề: %+v", iss)
+	}
+}
+
+func TestIssueRequiresDescriptionAndCategory(t *testing.T) {
+	e := newHKTestEnv(t)
+	bad := []map[string]interface{}{
+		{"room_id": e.roomID, "category": "dien_nuoc", "description": "  "},
+		{"room_id": e.roomID, "category": "khong-ton-tai", "description": "abc"},
+		{"room_id": "", "category": "dien_nuoc", "description": "abc"},
+	}
+	for _, b := range bad {
+		if w := e.do("POST", "/api/hk/issues/create", e.lanToken, b); w.Code < 400 {
+			t.Errorf("%v: phải bị từ chối, được %d", b, w.Code)
+		}
+	}
+}
+
+// Cô dọn dẹp chỉ thấy vấn đề CHÍNH MÌNH báo — báo xong rơi vào im lặng thì lần
+// sau không ai buồn báo nữa, nhưng cũng không được thấy việc của người khác.
+func TestCleanerSeesOnlyOwnIssues(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.reportIssue(t, e.lanToken, HKUrgencyNormal)
+	e.reportIssue(t, e.hoaToken, HKUrgencyNormal)
+
+	var out struct {
+		Issues []HKIssueView `json:"issues"`
+	}
+	e.decode(e.do("GET", "/api/hk/issues", e.lanToken, nil), &out)
+	if len(out.Issues) != 1 {
+		t.Fatalf("cô Lan phải chỉ thấy 1 vấn đề của mình, được %d", len(out.Issues))
+	}
+	if out.Issues[0].ReporterID != e.lanID {
+		t.Fatal("lọt vấn đề của người khác")
+	}
+
+	// Quản lý thấy hết.
+	e.decode(e.do("GET", "/api/hk/issues", e.adminToken, nil), &out)
+	if len(out.Issues) != 2 {
+		t.Fatalf("quản lý phải thấy cả 2, được %d", len(out.Issues))
+	}
+}
+
+func TestHandlerClaimsIssue(t *testing.T) {
+	e := newHKTestEnv(t)
+	iss := e.reportIssue(t, e.lanToken, HKUrgencyNormal)
+	hID, hTok := e.makeHandler(t, "Anh Kỹ Thuật", "0912349999")
+
+	w := e.do("POST", "/api/hk/issues/claim", hTok, map[string]string{"id": iss.ID})
+	if w.Code != 200 {
+		t.Fatalf("nhận việc hỏng (%d): %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Issue HKIssueView `json:"issue"`
+	}
+	e.decode(w, &out)
+	if out.Issue.AssigneeID != hID || out.Issue.Status != HKIssueAssigned {
+		t.Fatalf("%+v", out.Issue)
+	}
+}
+
+// Ai nhận trước được trước — không để hai người cùng đi sửa một chỗ.
+func TestSecondClaimRejected(t *testing.T) {
+	e := newHKTestEnv(t)
+	iss := e.reportIssue(t, e.lanToken, HKUrgencyNormal)
+	_, tok1 := e.makeHandler(t, "KT Một", "0912340001")
+	_, tok2 := e.makeHandler(t, "KT Hai", "0912340002")
+
+	if w := e.do("POST", "/api/hk/issues/claim", tok1, map[string]string{"id": iss.ID}); w.Code != 200 {
+		t.Fatalf("người đầu phải nhận được: %d", w.Code)
+	}
+	if w := e.do("POST", "/api/hk/issues/claim", tok2, map[string]string{"id": iss.ID}); w.Code != http.StatusConflict {
+		t.Fatalf("người thứ hai phải bị chặn, được %d", w.Code)
+	}
+}
+
+// Cô dọn dẹp không nhận việc kỹ thuật — cô thường không sửa được đèn điện.
+func TestCleanerCannotClaim(t *testing.T) {
+	e := newHKTestEnv(t)
+	iss := e.reportIssue(t, e.lanToken, HKUrgencyNormal)
+	if w := e.do("POST", "/api/hk/issues/claim", e.hoaToken, map[string]string{"id": iss.ID}); w.Code != http.StatusForbidden {
+		t.Fatalf("muốn 403 được %d", w.Code)
+	}
+}
+
+func TestAdminAssignsAndReopens(t *testing.T) {
+	e := newHKTestEnv(t)
+	iss := e.reportIssue(t, e.lanToken, HKUrgencyNormal)
+	hID, _ := e.makeHandler(t, "KT Ba", "0912340003")
+
+	var out struct {
+		Issue HKIssueView `json:"issue"`
+	}
+	e.decode(e.do("POST", "/api/hk/issues/assign", e.adminToken, map[string]interface{}{
+		"id": iss.ID, "assignee_id": hID, "urgency": HKUrgencyUrgent,
+	}), &out)
+	if out.Issue.AssigneeID != hID || out.Issue.Urgency != HKUrgencyUrgent {
+		t.Fatalf("%+v", out.Issue)
+	}
+
+	// Gỡ người phụ trách → việc quay lại hàng chờ, không biến mất.
+	e.decode(e.do("POST", "/api/hk/issues/assign", e.adminToken, map[string]interface{}{
+		"id": iss.ID, "assignee_id": "",
+	}), &out)
+	if out.Issue.Status != HKIssueOpen || out.Issue.AssigneeID != "" {
+		t.Fatalf("phải quay lại chờ nhận: %+v", out.Issue)
+	}
+}
+
+// Người ngoài không đóng được việc của người khác — đó là cách một việc chưa làm
+// bị đánh dấu xong.
+func TestOnlyAssigneeOrAdminResolves(t *testing.T) {
+	e := newHKTestEnv(t)
+	iss := e.reportIssue(t, e.lanToken, HKUrgencyNormal)
+	_, tok1 := e.makeHandler(t, "KT Bốn", "0912340004")
+	_, tok2 := e.makeHandler(t, "KT Năm", "0912340005")
+	e.do("POST", "/api/hk/issues/claim", tok1, map[string]string{"id": iss.ID})
+
+	if w := e.do("POST", "/api/hk/issues/resolve", tok2, map[string]string{
+		"id": iss.ID, "status": HKIssueDone, "note": "xong",
+	}); w.Code != http.StatusForbidden {
+		t.Fatalf("người khác không được đóng, được %d", w.Code)
+	}
+	if w := e.do("POST", "/api/hk/issues/resolve", tok1, map[string]string{
+		"id": iss.ID, "status": HKIssueDone, "note": "Đã thay vòi sen",
+	}); w.Code != 200 {
+		t.Fatalf("người phụ trách phải đóng được: %s", w.Body.String())
+	}
+}
+
+// "Bỏ qua" là quyết định của quản lý, không phải của người ngại làm.
+func TestOnlyAdminRejectsIssue(t *testing.T) {
+	e := newHKTestEnv(t)
+	iss := e.reportIssue(t, e.lanToken, HKUrgencyNormal)
+	_, tok := e.makeHandler(t, "KT Sáu", "0912340006")
+	e.do("POST", "/api/hk/issues/claim", tok, map[string]string{"id": iss.ID})
+
+	if w := e.do("POST", "/api/hk/issues/resolve", tok, map[string]string{
+		"id": iss.ID, "status": HKIssueRejected,
+	}); w.Code != http.StatusForbidden {
+		t.Fatalf("kỹ thuật không được bỏ qua, được %d", w.Code)
+	}
+	if w := e.do("POST", "/api/hk/issues/resolve", e.adminToken, map[string]string{
+		"id": iss.ID, "status": HKIssueRejected, "note": "Không phải hỏng",
+	}); w.Code != 200 {
+		t.Fatalf("quản lý phải bỏ qua được: %s", w.Body.String())
+	}
+}
+
+// Quản lý không tự hạ vai chính mình — mất quyền mà không lấy lại được.
+func TestAdminCannotDemoteSelf(t *testing.T) {
+	e := newHKTestEnv(t)
+	admins, _ := e.app.store.ListUsers(HKRoleAdmin)
+	if w := e.do("POST", "/api/hk/staffs/role", e.adminToken, map[string]string{
+		"id": admins[0].ID, "role": HKRoleHandler,
+	}); w.Code != http.StatusForbidden {
+		t.Fatalf("muốn 403 được %d", w.Code)
+	}
+}
+
+// Báo cáo hằng ngày của quản lý.
+func TestIssueSummaryForAdmin(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.reportIssue(t, e.lanToken, HKUrgencyUrgent)
+	e.reportIssue(t, e.hoaToken, HKUrgencyNormal)
+
+	var out struct {
+		Summary HKIssueSummary `json:"summary"`
+	}
+	e.decode(e.do("GET", "/api/hk/issues", e.adminToken, nil), &out)
+	if out.Summary.Total != 2 || out.Summary.Open != 2 {
+		t.Fatalf("%+v", out.Summary)
+	}
+	if out.Summary.Urgent != 1 {
+		t.Fatalf("phải đếm 1 việc khẩn chưa xong, được %d", out.Summary.Urgent)
+	}
+	if out.Summary.NewToday != 2 {
+		t.Fatalf("phải đếm 2 việc mới hôm nay, được %d", out.Summary.NewToday)
+	}
+}
