@@ -41,3 +41,9 @@ Thumbs.db
 # Không bao giờ được commit. Sao lưu bằng cách copy cả thư mục.
 hk_data/
 backend/hk_data/
+
+# ── Token Dayladau ──
+# Token đọc doanh thu. Mặc định nằm ở ~/.dayladau_token (ngoài repo), nhưng chặn
+# thêm ở đây phòng trường hợp ai đó để nhầm vào thư mục dự án.
+.dayladau_token
+*.token

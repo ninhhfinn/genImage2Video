@@ -1,6 +1,19 @@
 // Định dạng hiển thị. KHÔNG có phép tính tiền ở đây — backend tính, frontend hiện.
 
-// Không có hàm định dạng tiền: phần mềm này không tính lương.
+// Định dạng tiền dùng cho BÁO CÁO DOANH THU. Phần mềm vẫn không tính lương —
+// doanh thu phòng và lương cô dọn dẹp là hai chuyện tách biệt.
+export function money(n) {
+	return (Math.round(Number(n) || 0)).toLocaleString('vi-VN') + 'đ'
+}
+
+/** Rút gọn cho trục biểu đồ: 12.500.000đ → 12,5tr */
+export function shortMoney(n) {
+	const v = Math.round(Number(n) || 0)
+	if (v >= 1e9) return (v / 1e9).toFixed(1).replace('.', ',') + ' tỷ'
+	if (v >= 1e6) return (v / 1e6).toFixed(1).replace('.', ',') + 'tr'
+	if (v >= 1e3) return Math.round(v / 1e3) + 'k'
+	return String(v)
+}
 
 /** Thời lượng phút → "1h20p" hoặc "45p". */
 export function minutes(m) {

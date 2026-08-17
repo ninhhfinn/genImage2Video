@@ -120,6 +120,8 @@ export const api = {
 		return get('/api/hk/report?' + q)
 	},
 	reviews: (query = '') => get('/api/hk/reviews' + (query ? '?' + query : '')),
+	revenue: (query = '') => get('/api/hk/revenue' + (query ? '?' + query : '')),
+	syncRevenue: (days) => post('/api/hk/revenue/sync', { days }),
 	syncReviews: (days) => post('/api/hk/reviews/sync', { days }),
 
 	uploadPhoto: (file) => {

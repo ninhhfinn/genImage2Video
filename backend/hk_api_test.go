@@ -1115,3 +1115,106 @@ func TestIsAdminHost(t *testing.T) {
 		}
 	}
 }
+
+// ─── Doanh thu ────────────────────────────────────────────────────────────
+
+func (e *hkTestEnv) seedRevenue(t *testing.T) {
+	t.Helper()
+	e.app.store.UpsertRoom(HKRoom{ID: "r-a", Code: "A1", Name: "Phòng A", FacilityID: 1, FacilityLabel: "Cơ sở 1", Active: true})
+	e.app.store.UpsertRoom(HKRoom{ID: "r-b", Code: "B1", Name: "Phòng B", FacilityID: 2, FacilityLabel: "Cơ sở 2", Active: true})
+	rows := []HKRevenueRow{
+		{RoomID: "r-a", Day: "2026-08-10", Revenue: 1_000_000, Bookings: 2},
+		{RoomID: "r-a", Day: "2026-08-11", Revenue: 500_000, Bookings: 1},
+		{RoomID: "r-b", Day: "2026-08-11", Revenue: 300_000, Bookings: 1},
+		{RoomID: "r-b", Day: "2026-08-20", Revenue: 900_000, Bookings: 3},
+	}
+	if _, err := e.app.store.UpsertRevenue(rows, hkNowMs()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (e *hkTestEnv) revenue(t *testing.T, q string) map[string]interface{} {
+	t.Helper()
+	w := e.do("GET", "/api/hk/revenue?"+q, e.adminToken, nil)
+	if w.Code != 200 {
+		t.Fatalf("đọc doanh thu hỏng (%d): %s", w.Code, w.Body.String())
+	}
+	var out map[string]interface{}
+	e.decode(w, &out)
+	return out
+}
+
+func TestRevenueSummaryByDayAndRoom(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.seedRevenue(t)
+	out := e.revenue(t, "from=2026-08-01&to=2026-08-31")
+
+	total := out["total"].(map[string]interface{})
+	if got := total["revenue"].(float64); got != 2_700_000 {
+		t.Fatalf("tổng phải là 2.700.000, được %.0f", got)
+	}
+	byDay := out["by_day"].([]interface{})
+	if len(byDay) != 3 {
+		t.Fatalf("muốn 3 ngày có doanh thu, được %d", len(byDay))
+	}
+	// Theo phòng phải sắp giảm dần.
+	byRoom := out["by_room"].([]interface{})
+	first := byRoom[0].(map[string]interface{})
+	if first["room_id"] != "r-a" {
+		t.Fatalf("phòng doanh thu cao nhất phải đứng đầu, được %v", first["room_id"])
+	}
+}
+
+func TestRevenueFilterByDateRange(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.seedRevenue(t)
+	out := e.revenue(t, "from=2026-08-10&to=2026-08-11")
+	if got := out["total"].(map[string]interface{})["revenue"].(float64); got != 1_800_000 {
+		t.Fatalf("lọc 10→11/08 phải ra 1.800.000, được %.0f", got)
+	}
+	// Khoảng ngày phải GỒM CẢ ngày cuối.
+	out = e.revenue(t, "from=2026-08-20&to=2026-08-20")
+	if got := out["total"].(map[string]interface{})["revenue"].(float64); got != 900_000 {
+		t.Fatalf("ngày cuối phải được tính, được %.0f", got)
+	}
+}
+
+func TestRevenueFilterByFacilityAndRoom(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.seedRevenue(t)
+	if got := e.revenue(t, "from=2026-08-01&to=2026-08-31&facility_id=2")["total"].(map[string]interface{})["revenue"].(float64); got != 1_200_000 {
+		t.Fatalf("lọc cơ sở 2 phải ra 1.200.000, được %.0f", got)
+	}
+	if got := e.revenue(t, "from=2026-08-01&to=2026-08-31&room_id=r-a")["total"].(map[string]interface{})["revenue"].(float64); got != 1_500_000 {
+		t.Fatalf("lọc phòng A phải ra 1.500.000, được %.0f", got)
+	}
+}
+
+// Doanh thu là thông tin kinh doanh — cô dọn dẹp không xem được.
+func TestRevenueAdminOnly(t *testing.T) {
+	e := newHKTestEnv(t)
+	for _, p := range []string{"/api/hk/revenue?from=2026-08-01&to=2026-08-31"} {
+		if w := e.do("GET", p, e.lanToken, nil); w.Code != http.StatusForbidden {
+			t.Errorf("%s: muốn 403 được %d", p, w.Code)
+		}
+	}
+	if w := e.do("POST", "/api/hk/revenue/sync", e.lanToken, map[string]int{"days": 7}); w.Code != http.StatusForbidden {
+		t.Errorf("sync: muốn 403 được %d", w.Code)
+	}
+}
+
+// Chưa có token thì phải nói rõ, không im lặng trả 0đ — "doanh thu 0đ" và "chưa
+// cấu hình token" là hai chuyện hoàn toàn khác nhau.
+func TestRevenueSyncSaysWhenTokenMissing(t *testing.T) {
+	e := newHKTestEnv(t)
+	t.Setenv("DLD_TOKEN", "")
+	t.Setenv("DLD_TOKEN_FILE", filepath.Join(t.TempDir(), "khong-ton-tai"))
+
+	w := e.do("POST", "/api/hk/revenue/sync", e.adminToken, map[string]int{"days": 7})
+	if w.Code != http.StatusPreconditionFailed {
+		t.Fatalf("muốn 412 được %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "token") {
+		t.Fatalf("thông báo phải nhắc tới token: %s", w.Body.String())
+	}
+}

@@ -153,6 +153,16 @@ func (s *HKStore) migrate() error {
 		`CREATE INDEX IF NOT EXISTS hk_review_created ON hk_review(created_at)`,
 		`CREATE INDEX IF NOT EXISTS hk_review_room ON hk_review(room_id)`,
 		`CREATE INDEX IF NOT EXISTS hk_review_facility ON hk_review(facility_id)`,
+		`CREATE TABLE IF NOT EXISTS hk_revenue (
+			room_id TEXT NOT NULL,
+			listing_id TEXT NOT NULL DEFAULT '',
+			day TEXT NOT NULL,
+			revenue INTEGER NOT NULL DEFAULT 0,
+			bookings INTEGER NOT NULL DEFAULT 0,
+			synced_at INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (room_id, day)
+		)`,
+		`CREATE INDEX IF NOT EXISTS hk_revenue_day ON hk_revenue(day)`,
 		// Một phòng chỉ có một ca mỗi ngày — chặn ở tầng DB để job đồng bộ chạy hai
 		// lần không đẻ ra hai ca, kéo theo trả tiền hai lần.
 		// Khoá chống trùng là MÃ LƯỢT ĐẶT, không phải (phòng, ngày): 59/60 phòng
@@ -782,5 +792,159 @@ func (s *HKStore) ListReviews(f HKReviewFilter) ([]HKReview, error) {
 func (s *HKStore) LastReviewSync() int64 {
 	var n int64
 	s.db.QueryRow(`SELECT COALESCE(MAX(synced_at), 0) FROM hk_review`).Scan(&n)
+	return n
+}
+
+// ─── Doanh thu theo ngày check-in (cache) ─────────────────────────────────
+
+type HKRevenueRow struct {
+	RoomID    string `json:"room_id"`
+	ListingID string `json:"listing_id"`
+	Day       string `json:"day"`
+	Revenue   int64  `json:"revenue"`
+	Bookings  int    `json:"bookings"`
+}
+
+func (s *HKStore) UpsertRevenue(rows []HKRevenueRow, now int64) (int, error) {
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`
+		INSERT INTO hk_revenue (room_id, listing_id, day, revenue, bookings, synced_at)
+		VALUES (?,?,?,?,?,?)
+		ON CONFLICT(room_id, day) DO UPDATE SET
+			revenue=excluded.revenue, bookings=excluded.bookings, synced_at=excluded.synced_at`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+	n := 0
+	for _, r := range rows {
+		if _, err := stmt.Exec(r.RoomID, r.ListingID, r.Day, r.Revenue, r.Bookings, now); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, tx.Commit()
+}
+
+type HKRevenueFilter struct {
+	RoomID     string
+	FacilityID int
+	FromDay    string
+	ToDay      string
+}
+
+type HKRevenueDay struct {
+	Day      string `json:"day"`
+	Revenue  int64  `json:"revenue"`
+	Bookings int    `json:"bookings"`
+}
+
+type HKRevenueRoom struct {
+	RoomID    string `json:"room_id"`
+	RoomCode  string `json:"room_code"`
+	RoomName  string `json:"room_name"`
+	Facility  string `json:"facility_label"`
+	Revenue   int64  `json:"revenue"`
+	Bookings  int    `json:"bookings"`
+	ActiveDay int    `json:"active_days"` // số ngày có khách
+}
+
+type HKRevenueTotal struct {
+	Revenue   int64 `json:"revenue"`
+	Bookings  int   `json:"bookings"`
+	Rooms     int   `json:"rooms"`
+	Days      int   `json:"days"`
+	AvgPerDay int64 `json:"avg_per_day"`
+}
+
+// RevenueSummary gộp theo ngày và theo phòng trong một lượt đọc.
+func (s *HKStore) RevenueSummary(f HKRevenueFilter) ([]HKRevenueDay, []HKRevenueRoom, HKRevenueTotal, error) {
+	var total HKRevenueTotal
+	where := ` WHERE 1=1`
+	var args []interface{}
+	if f.FromDay != "" {
+		where += ` AND v.day >= ?`
+		args = append(args, f.FromDay)
+	}
+	if f.ToDay != "" {
+		where += ` AND v.day <= ?`
+		args = append(args, f.ToDay)
+	}
+	if f.RoomID != "" {
+		where += ` AND v.room_id = ?`
+		args = append(args, f.RoomID)
+	}
+	if f.FacilityID > 0 {
+		where += ` AND r.facility_id = ?`
+		args = append(args, f.FacilityID)
+	}
+
+	// Theo ngày
+	rows, err := s.db.Query(`
+		SELECT v.day, SUM(v.revenue), SUM(v.bookings)
+		FROM hk_revenue v LEFT JOIN hk_room r ON r.id = v.room_id`+where+`
+		GROUP BY v.day ORDER BY v.day`, args...)
+	if err != nil {
+		return nil, nil, total, err
+	}
+	byDay := []HKRevenueDay{}
+	for rows.Next() {
+		var d HKRevenueDay
+		if err := rows.Scan(&d.Day, &d.Revenue, &d.Bookings); err != nil {
+			rows.Close()
+			return nil, nil, total, err
+		}
+		byDay = append(byDay, d)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, nil, total, err
+	}
+
+	// Theo phòng
+	rows, err = s.db.Query(`
+		SELECT v.room_id, COALESCE(r.code,''), COALESCE(r.name,''), COALESCE(r.facility_label,''),
+			SUM(v.revenue), SUM(v.bookings), COUNT(*)
+		FROM hk_revenue v LEFT JOIN hk_room r ON r.id = v.room_id`+where+`
+		GROUP BY v.room_id ORDER BY SUM(v.revenue) DESC`, args...)
+	if err != nil {
+		return nil, nil, total, err
+	}
+	defer rows.Close()
+	byRoom := []HKRevenueRoom{}
+	for rows.Next() {
+		var x HKRevenueRoom
+		if err := rows.Scan(&x.RoomID, &x.RoomCode, &x.RoomName, &x.Facility,
+			&x.Revenue, &x.Bookings, &x.ActiveDay); err != nil {
+			return nil, nil, total, err
+		}
+		byRoom = append(byRoom, x)
+		total.Revenue += x.Revenue
+		total.Bookings += x.Bookings
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, total, err
+	}
+
+	total.Rooms = len(byRoom)
+	total.Days = len(byDay)
+	if total.Days > 0 {
+		total.AvgPerDay = total.Revenue / int64(total.Days)
+	}
+	return byDay, byRoom, total, nil
+}
+
+func (s *HKStore) LastRevenueSync() int64 {
+	var n int64
+	s.db.QueryRow(`SELECT COALESCE(MAX(synced_at), 0) FROM hk_revenue`).Scan(&n)
 	return n
 }

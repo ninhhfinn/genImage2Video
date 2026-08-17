@@ -1104,6 +1104,8 @@ func (a *HKApp) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/hk/report", a.handleReport)
 	mux.HandleFunc("/api/hk/reviews", a.handleReviews)
 	mux.HandleFunc("/api/hk/reviews/sync", a.handleReviewsSync)
+	mux.HandleFunc("/api/hk/revenue", a.handleRevenue)
+	mux.HandleFunc("/api/hk/revenue/sync", a.handleRevenueSync)
 
 	mux.HandleFunc("/api/hk/photos", a.handlePhotoUpload)
 	mux.HandleFunc("/api/hk/photo/", a.handlePhotoServe)

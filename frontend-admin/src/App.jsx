@@ -16,6 +16,7 @@ import {
 	ReportPage,
 	ReviewPage,
 	ReviewsPage,
+	RevenuePage,
 	RoomsPage,
 	SessionDetailPage,
 	StaffPage,
@@ -62,6 +63,7 @@ function Routes() {
 	if (path === '/review') return <ReviewPage />
 	if (path === '/report') return <ReportPage />
 	if (path === '/reviews') return <ReviewsPage />
+	if (path === '/revenue') return <RevenuePage />
 	if (path === '/staff') return <StaffPage />
 	if (path === '/rooms') return <RoomsPage />
 	if (path === '/checklists') return <ChecklistPage />

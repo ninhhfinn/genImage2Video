@@ -97,13 +97,34 @@ func (a *HKApp) hkSyncRooms(limit int) (added, updated int, err error) {
 		limit = 60
 	}
 	now := time.Now()
-	// Dùng khoảng ngày mai→ngày kia: API trả phòng còn trống trong khoảng đó.
-	// Lấy khoảng gần để danh sách bám sát những căn đang thật sự bán.
-	checkin := now.AddDate(0, 0, 1).Format("2006-01-02")
-	checkout := now.AddDate(0, 0, 2).Format("2006-01-02")
-	// Ba tham số địa điểm để rỗng: module dọn dẹp cần TẤT CẢ phòng đang bán, không
-	// lọc theo tỉnh/phường như màn dựng video.
-	apiURL := buildDayladauURL(checkin, checkout, 2, limit, 1, "", "", "")
+
+	// CÓ TOKEN thì lấy đúng phòng của tài khoản host; KHÔNG có thì rơi về API tìm
+	// phòng công khai.
+	//
+	// Khác biệt này quan trọng hơn vẻ ngoài: API công khai trả phòng của MỌI host
+	// trên Dayladau, nên trước đây hệ thống quản lý cả phòng của người khác — cô
+	// dọn dẹp có thể bị xếp vào căn không thuộc Unixstay, và doanh thu thì không
+	// đọc được vì token không có quyền. Đo thật: 90 phòng đồng bộ nhưng chỉ 7
+	// phòng có doanh thu.
+	apiURL := ""
+	token := hkDayladauToken()
+	if token != "" {
+		hostID, err := hkFetchHostID(token)
+		if err != nil {
+			log.Printf("[hk] không lấy được host_id, dùng API công khai: %v", err)
+		} else {
+			apiURL = fmt.Sprintf(
+				"https://api.dayladau.com/v1/listings?host_id=%s&limit=%d&x_access_token=%s",
+				hostID, limit, token)
+		}
+	}
+	if apiURL == "" {
+		// Khoảng ngày mai→ngày kia: API trả phòng còn trống trong khoảng đó.
+		checkin := now.AddDate(0, 0, 1).Format("2006-01-02")
+		checkout := now.AddDate(0, 0, 2).Format("2006-01-02")
+		// Ba tham số địa điểm để rỗng: cần mọi phòng, không lọc theo tỉnh/phường.
+		apiURL = buildDayladauURL(checkin, checkout, 2, limit, 1, "", "", "")
+	}
 
 	raw, err := fetchRawJSON(apiURL, nil)
 	if err != nil {
@@ -114,7 +135,7 @@ func (a *HKApp) hkSyncRooms(limit int) (added, updated int, err error) {
 		return 0, 0, fmt.Errorf("không đọc được phản hồi Dayladau: %w", err)
 	}
 	if len(resp.Listings) == 0 {
-		return 0, 0, fmt.Errorf("Dayladau không trả phòng nào cho khoảng %s → %s", checkin, checkout)
+		return 0, 0, fmt.Errorf("Dayladau không trả phòng nào — kiểm tra token còn dùng được không")
 	}
 
 	existing, err := a.store.ListRooms(false)

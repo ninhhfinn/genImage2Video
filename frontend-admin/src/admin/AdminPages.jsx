@@ -6,7 +6,7 @@ import { api, photoSrc } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import { Link, useRouter } from '../router.jsx'
 import { Alert, Empty, Progress, SessionBadge, Spinner, StaffBadge, Stat } from '../components/ui.jsx'
-import { ROOM_TYPE_LABEL, dayKey, dayLabel, dayMonth, hour, minutes, shiftDay } from '../format.js'
+import { ROOM_TYPE_LABEL, dayKey, dayLabel, dayMonth, hour, minutes, money, shiftDay, shortMoney } from '../format.js'
 import { ReviewFilters, defaultReviewFilter, reviewQuery } from '../components/ReviewFilters.jsx'
 
 const TABS = [
@@ -14,6 +14,7 @@ const TABS = [
 	{ key: 'review', label: 'Duyệt ảnh', icon: '✅', to: '/review' },
 	{ key: 'report', label: 'Báo cáo', icon: '📊', to: '/report' },
 	{ key: 'reviews', label: 'Đánh giá khách', icon: '⭐', to: '/reviews' },
+	{ key: 'revenue', label: 'Doanh thu', icon: '💰', to: '/revenue' },
 	{ key: 'staff', label: 'Cô dọn dẹp', icon: '👥', to: '/staff' },
 	{ key: 'rooms', label: 'Phòng', icon: '🏠', to: '/rooms' },
 	{ key: 'checklist', label: 'Mẫu checklist', icon: '📝', to: '/checklists' },
@@ -751,6 +752,225 @@ function ReviewRow({ r }) {
 			</div>
 			{r.comment && <div className="rv-text">{r.comment}</div>}
 		</div>
+	)
+}
+
+// ─── Doanh thu theo ngày check-in ─────────────────────────────────────────
+//
+// Điểm khác biệt cốt lõi so với báo cáo của host.dayladau.com: bên đó tính theo
+// ngày BÁN ĐƠN, ở đây tính theo ngày khách THẬT SỰ Ở. Một đơn đặt hôm nay cho
+// ngày ở tháng sau rơi vào hai ngày khác nhau.
+//
+// Chỉ quản lý xem được — doanh thu phòng là thông tin kinh doanh, và lương của
+// cô dọn dẹp không liên quan gì tới nó.
+
+export function RevenuePage() {
+	const [filter, setFilter] = useState(() => ({
+		from: shiftDay(dayKey(), -29),
+		to: dayKey(),
+		facility_id: '',
+		room_id: '',
+	}))
+	const [data, setData] = useState(null)
+	const [err, setErr] = useState('')
+	const [syncing, setSyncing] = useState(false)
+	const [msg, setMsg] = useState('')
+	const [facilities, setFacilities] = useState([])
+	const [rooms, setRooms] = useState([])
+
+	useEffect(() => {
+		api
+			.rooms()
+			.then((d) => {
+				const rs = d.rooms || []
+				setRooms(rs)
+				const seen = new Map()
+				rs.forEach((r) => {
+					if (r.facility_id && !seen.has(r.facility_id)) {
+						seen.set(r.facility_id, r.facility_label || `Cơ sở #${r.facility_id}`)
+					}
+				})
+				setFacilities([...seen].map(([id, label]) => ({ id: String(id), label })).sort((a, b) => a.label.localeCompare(b.label)))
+			})
+			.catch(() => {})
+	}, [])
+
+	async function load(f) {
+		setData(null)
+		try {
+			const q = new URLSearchParams()
+			Object.entries(f).forEach(([k, v]) => v && q.set(k, v))
+			setData(await api.revenue(q.toString()))
+			setErr('')
+		} catch (e) {
+			setErr(e.message)
+			setData({ by_day: [], by_room: [], total: {} })
+		}
+	}
+
+	useEffect(() => {
+		load(filter)
+	}, [filter])
+
+	async function sync() {
+		setSyncing(true)
+		setErr('')
+		setMsg('')
+		try {
+			const d = await api.syncRevenue(90)
+			setMsg(`Đã tải về ${d.synced} dòng doanh thu từ Dayladau.`)
+			await load(filter)
+		} catch (e) {
+			setErr(e.message)
+		} finally {
+			setSyncing(false)
+		}
+	}
+
+	const set = (patch) => setFilter({ ...filter, ...patch })
+	const total = data?.total || {}
+	const byDay = data?.by_day || []
+	const byRoom = data?.by_room || []
+	const peak = Math.max(1, ...byDay.map((d) => d.revenue))
+	const roomOptions = filter.facility_id
+		? rooms.filter((r) => String(r.facility_id) === String(filter.facility_id))
+		: rooms
+
+	return (
+		<AdminShell active="revenue">
+			<div className="page-head">
+				<div>
+					<h1>Doanh thu theo ngày check-in</h1>
+					<p className="sub">
+						Tính theo ngày khách <strong>thật sự ở</strong>, không phải ngày bán đơn như báo cáo của host.dayladau.com.
+						{data?.last_sync_at ? ` Cập nhật ${dayMonth(data.last_sync_at)} ${hour(data.last_sync_at)}.` : ''}
+					</p>
+				</div>
+				<button className="btn btn--primary" disabled={syncing} onClick={sync}>
+					{syncing ? 'Đang tải…' : 'Tải doanh thu mới'}
+				</button>
+			</div>
+
+			{data && data.has_token === false && (
+				<Alert tone="warn">
+					Chưa cấu hình token Dayladau nên không tải được doanh thu mới. Đăng nhập tài khoản host rồi lưu token vào
+					~/.dayladau_token trên máy chủ.
+				</Alert>
+			)}
+
+			<div className="filters">
+				<div className="filters-row">
+					<label className="filter">
+						<span>Từ ngày</span>
+						<input type="date" value={filter.from} max={filter.to} onChange={(e) => set({ from: e.target.value })} />
+					</label>
+					<label className="filter">
+						<span>Đến ngày</span>
+						<input type="date" value={filter.to} min={filter.from} onChange={(e) => set({ to: e.target.value })} />
+					</label>
+					<label className="filter">
+						<span>Cơ sở</span>
+						<select value={filter.facility_id} onChange={(e) => set({ facility_id: e.target.value, room_id: '' })}>
+							<option value="">Tất cả cơ sở</option>
+							{facilities.map((f) => (
+								<option key={f.id} value={f.id}>{f.label}</option>
+							))}
+						</select>
+					</label>
+					<label className="filter">
+						<span>Phòng</span>
+						<select value={filter.room_id} onChange={(e) => set({ room_id: e.target.value })}>
+							<option value="">Tất cả phòng</option>
+							{roomOptions.map((r) => (
+								<option key={r.id} value={r.id}>{r.code} · {r.name}</option>
+							))}
+						</select>
+					</label>
+				</div>
+				<div className="filters-row filters-row--chips">
+					{[7, 30, 90].map((n) => (
+						<button
+							key={n}
+							className={`chip chip--range${filter.to === dayKey() && filter.from === shiftDay(dayKey(), -n + 1) ? ' active' : ''}`}
+							onClick={() => set({ from: shiftDay(dayKey(), -n + 1), to: dayKey() })}
+						>
+							{n} ngày
+						</button>
+					))}
+				</div>
+			</div>
+
+			<Alert>{err}</Alert>
+			{msg && <Alert tone="ok">{msg}</Alert>}
+
+			{data === null ? (
+				<Spinner />
+			) : !byDay.length ? (
+				<Empty icon="💰">
+					Chưa có dữ liệu doanh thu trong khoảng này. Bấm “Tải doanh thu mới” nếu chưa tải bao giờ.
+				</Empty>
+			) : (
+				<>
+					<div className="stats">
+						<Stat label="Tổng doanh thu" value={money(total.revenue)} sub={`${total.days} ngày`} />
+						<Stat label="Trung bình mỗi ngày" value={money(total.avg_per_day)} />
+						<Stat label="Số đơn" value={total.bookings} />
+						<Stat label="Phòng có khách" value={total.rooms} sub={`/ ${rooms.length} phòng`} />
+					</div>
+
+					{/* Biểu đồ cột thuần CSS, không kéo thư viện đồ thị vào cho một màn. */}
+					<div className="card pad">
+						<h2>Theo ngày</h2>
+						<div className="chart">
+							{byDay.map((d) => (
+								<div
+									key={d.day}
+									className="chart-col"
+									title={`${d.day}: ${money(d.revenue)} · ${d.bookings} đơn`}
+								>
+									<div className="chart-bar" style={{ height: `${(d.revenue / peak) * 100}%` }} />
+									<span className="chart-x">{d.day.slice(8)}</span>
+								</div>
+							))}
+						</div>
+						<div className="chart-legend">
+							<span>Cao nhất: {money(peak)}</span>
+							<span>{byDay[0]?.day} → {byDay[byDay.length - 1]?.day}</span>
+						</div>
+					</div>
+
+					<div className="card table-wrap">
+						<table>
+							<thead>
+								<tr>
+									<th>Phòng</th>
+									<th>Cơ sở</th>
+									<th className="right">Doanh thu</th>
+									<th className="right">Đơn</th>
+									<th className="right">Ngày có khách</th>
+									<th className="right">TB mỗi đơn</th>
+								</tr>
+							</thead>
+							<tbody>
+								{byRoom.map((r) => (
+									<tr key={r.room_id}>
+										<td>
+											<div className="strong">{r.room_name || r.room_id}</div>
+											<div className="meta">{r.room_code}</div>
+										</td>
+										<td>{r.facility_label || '—'}</td>
+										<td className="right"><strong>{money(r.revenue)}</strong></td>
+										<td className="right">{r.bookings}</td>
+										<td className="right">{r.active_days}</td>
+										<td className="right">{r.bookings ? money(Math.round(r.revenue / r.bookings)) : '—'}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				</>
+			)}
+		</AdminShell>
 	)
 }
 
