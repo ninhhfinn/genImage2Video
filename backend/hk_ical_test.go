@@ -453,3 +453,49 @@ func TestMergeGuidanceNilSafe(t *testing.T) {
 		t.Fatal("không có mẫu sống thì giữ bản chụp")
 	}
 }
+
+// ─── Lọc phòng theo chủ sở hữu thật ───────────────────────────────────────
+
+// Tham số host_id của Dayladau KHÔNG lọc theo sở hữu mà theo quan hệ đồng quản
+// lý: hỏi host_id của Unixstay trả 54 phòng nhưng chỉ 30 phòng có host.id đúng
+// là Unixstay. Nếu không lọc lại, hệ thống quản lý cả phòng của người khác.
+func TestFilterListingsByOwner(t *testing.T) {
+	listings := []hkRawListing{
+		{ID: "l1", Host: hkListingHost{ID: "unixstay", Fullname: "Unixstay"}},
+		{ID: "l2", Host: hkListingHost{ID: "myslay", Fullname: "Myslay home"}},
+		{ID: "l3", Host: hkListingHost{ID: "unixstay", Fullname: "Unixstay"}},
+		{ID: "l4", Host: hkListingHost{ID: "citisnug", Fullname: "Citisnug"}},
+	}
+
+	kept := hkKeepOwnedListings(listings, "unixstay", nil)
+	if len(kept) != 2 {
+		t.Fatalf("muốn giữ 2 phòng của Unixstay, được %d", len(kept))
+	}
+	for _, l := range kept {
+		if l.Host.ID != "unixstay" {
+			t.Fatalf("lọt phòng của %s", l.Host.Fullname)
+		}
+	}
+}
+
+// Khai thêm chủ nhà đối tác thì nhận cả phòng của họ.
+func TestFilterListingsWithExtraHosts(t *testing.T) {
+	listings := []hkRawListing{
+		{ID: "l1", Host: hkListingHost{ID: "unixstay"}},
+		{ID: "l2", Host: hkListingHost{ID: "myslay"}},
+		{ID: "l3", Host: hkListingHost{ID: "citisnug"}},
+	}
+	kept := hkKeepOwnedListings(listings, "unixstay", []string{"myslay"})
+	if len(kept) != 2 {
+		t.Fatalf("muốn 2 phòng (mình + đối tác đã khai), được %d", len(kept))
+	}
+}
+
+// Không xác định được chủ tài khoản (chạy không token) thì giữ nguyên tất cả,
+// không im lặng xoá sạch danh sách phòng.
+func TestFilterListingsKeepsAllWhenNoOwner(t *testing.T) {
+	listings := []hkRawListing{{ID: "l1", Host: hkListingHost{ID: "ai-do"}}}
+	if got := len(hkKeepOwnedListings(listings, "", nil)); got != 1 {
+		t.Fatalf("không có ownerID thì giữ nguyên, được %d", got)
+	}
+}

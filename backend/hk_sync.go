@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -107,12 +108,14 @@ func (a *HKApp) hkSyncRooms(limit int) (added, updated int, err error) {
 	// đọc được vì token không có quyền. Đo thật: 90 phòng đồng bộ nhưng chỉ 7
 	// phòng có doanh thu.
 	apiURL := ""
+	ownerID := ""
 	token := hkDayladauToken()
 	if token != "" {
 		hostID, err := hkFetchHostID(token)
 		if err != nil {
 			log.Printf("[hk] không lấy được host_id, dùng API công khai: %v", err)
 		} else {
+			ownerID = hostID
 			apiURL = fmt.Sprintf(
 				"https://api.dayladau.com/v1/listings?host_id=%s&limit=%d&x_access_token=%s",
 				hostID, limit, token)
@@ -171,6 +174,26 @@ func (a *HKApp) hkSyncRooms(limit int) (added, updated int, err error) {
 		}
 		parsed = append(parsed, l)
 	}
+
+	// Lọc lại theo CHỦ SỞ HỮU THẬT của từng phòng.
+	//
+	// Tham số host_id của Dayladau không lọc theo sở hữu mà theo một quan hệ rộng
+	// hơn (đồng quản lý / cùng cơ sở): hỏi host_id của Unixstay trả về 54 phòng
+	// nhưng chỉ 30 phòng có host.id đúng là Unixstay, 24 phòng còn lại thuộc
+	// Myslay/Citisnug/Miumiu. Quan hệ này hai chiều — hỏi host_id của Myslay lại
+	// trả về 2 phòng Unixstay.
+	//
+	// Doanh thu xác nhận đúng 30 phòng đó là của mình: 24 phòng kia token không
+	// đọc được doanh thu (API trả rỗng). Nên host.id là dấu hiệu đáng tin duy nhất.
+	//
+	// Muốn nhận cả phòng đối tác thì khai thêm id chủ nhà vào HK_INCLUDE_HOSTS.
+	if before := len(parsed); ownerID != "" {
+		parsed = hkKeepOwnedListings(parsed, ownerID, strings.Split(os.Getenv("HK_INCLUDE_HOSTS"), ","))
+		if dropped := before - len(parsed); dropped > 0 {
+			log.Printf("[hk] bỏ %d phòng không thuộc tài khoản %s (đồng quản lý, không phải của mình)", dropped, ownerID)
+		}
+	}
+
 	facilityLabels := hkFacilityLabels(parsed)
 
 	for _, l := range parsed {
@@ -521,4 +544,27 @@ func hkMostCommon(m map[string]int) string {
 		}
 	}
 	return best
+}
+
+// hkKeepOwnedListings giữ lại phòng có chủ sở hữu thật là ownerID.
+//
+// ownerID rỗng (chạy không token) thì giữ nguyên tất cả — thà hiện thừa còn hơn
+// im lặng xoá sạch danh sách phòng.
+func hkKeepOwnedListings(listings []hkRawListing, ownerID string, extraHosts []string) []hkRawListing {
+	if ownerID == "" {
+		return listings
+	}
+	allow := map[string]bool{ownerID: true}
+	for _, h := range extraHosts {
+		if h = strings.TrimSpace(h); h != "" {
+			allow[h] = true
+		}
+	}
+	out := make([]hkRawListing, 0, len(listings))
+	for _, l := range listings {
+		if allow[l.Host.ID] {
+			out = append(out, l)
+		}
+	}
+	return out
 }
