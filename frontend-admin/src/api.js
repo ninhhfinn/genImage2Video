@@ -96,6 +96,7 @@ export const api = {
 
 	templates: () => get('/api/hk/templates'),
 	saveTemplate: (tpl) => post('/api/hk/templates', tpl),
+	applyTemplate: (templateId, roomIds) => post('/api/hk/templates/apply', { template_id: templateId, room_ids: roomIds }),
 
 	sessions: (filter = {}) => {
 		const q = new URLSearchParams()

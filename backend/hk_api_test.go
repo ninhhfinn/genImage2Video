@@ -955,3 +955,98 @@ func TestSeedTemplatesAllRequirePhoto(t *testing.T) {
 		}
 	}
 }
+
+// ─── Áp dụng mẫu cho nhiều phòng ──────────────────────────────────────────
+
+func TestApplyTemplateToManyRooms(t *testing.T) {
+	e := newHKTestEnv(t)
+	for _, id := range []string{"r-a", "r-b", "r-c"} {
+		if err := e.app.store.UpsertRoom(HKRoom{ID: id, Name: id, TemplateID: "hkt_studio", Active: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := e.do("POST", "/api/hk/templates/apply", e.adminToken, map[string]interface{}{
+		"template_id": "hkt_2pn", "room_ids": []string{"r-a", "r-c"},
+	})
+	if w.Code != 200 {
+		t.Fatalf("áp dụng hỏng (%d): %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Updated int `json:"updated"`
+	}
+	e.decode(w, &out)
+	if out.Updated != 2 {
+		t.Fatalf("muốn đổi 2 phòng, được %d", out.Updated)
+	}
+	for id, want := range map[string]string{"r-a": "hkt_2pn", "r-b": "hkt_studio", "r-c": "hkt_2pn"} {
+		room, _ := e.app.store.RoomByID(id)
+		if room.TemplateID != want {
+			t.Errorf("%s: muốn %s được %s", id, want, room.TemplateID)
+		}
+	}
+}
+
+// Ca ĐANG DỞ phải giữ mẫu cũ — đổi giữa chừng là làm cô đang dọn bỗng thiếu ảnh
+// cho mục chưa từng tồn tại lúc cô bắt đầu.
+func TestApplyTemplateDoesNotChangeOpenSession(t *testing.T) {
+	e := newHKTestEnv(t)
+	sess := e.createSession(today())
+	before, _ := e.app.store.SessionByID(sess.ID)
+	beforeItems := len(hkFlattenItems(before.TemplateSnapshot))
+
+	e.do("POST", "/api/hk/templates/apply", e.adminToken, map[string]interface{}{
+		"template_id": "hkt_duplex", "room_ids": []string{e.roomID},
+	})
+
+	after, _ := e.app.store.SessionByID(sess.ID)
+	if got := len(hkFlattenItems(after.TemplateSnapshot)); got != beforeItems {
+		t.Fatalf("ca đang dở phải giữ mẫu cũ: %d mục → %d mục", beforeItems, got)
+	}
+}
+
+func TestApplyTemplateRejectsBadInput(t *testing.T) {
+	e := newHKTestEnv(t)
+	bad := []map[string]interface{}{
+		{"template_id": "", "room_ids": []string{e.roomID}},
+		{"template_id": "khong-ton-tai", "room_ids": []string{e.roomID}},
+		{"template_id": "hkt_studio", "room_ids": []string{}},
+	}
+	for _, b := range bad {
+		if w := e.do("POST", "/api/hk/templates/apply", e.adminToken, b); w.Code < 400 {
+			t.Errorf("%v: phải bị từ chối, được %d", b, w.Code)
+		}
+	}
+}
+
+func TestApplyTemplateAdminOnly(t *testing.T) {
+	e := newHKTestEnv(t)
+	w := e.do("POST", "/api/hk/templates/apply", e.lanToken, map[string]interface{}{
+		"template_id": "hkt_2pn", "room_ids": []string{e.roomID},
+	})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("muốn 403 được %d", w.Code)
+	}
+}
+
+// Ảnh mẫu phải sống sót qua lưu/đọc và qua bước chuẩn hoá.
+func TestSamplePhotoSurvivesSave(t *testing.T) {
+	e := newHKTestEnv(t)
+	w := e.do("POST", "/api/hk/templates", e.adminToken, HKTemplate{
+		ID: "hkt_studio", Name: "Thử", Groups: []HKGroup{
+			{ID: "g", Title: "Nhóm", Items: []HKItem{
+				{ID: "i1", Title: "Thay ga", Hint: "Thấy cả 4 góc", SamplePhoto: "/api/hk/photo/mau.jpg"},
+			}},
+		},
+	})
+	if w.Code != 200 {
+		t.Fatalf("lưu hỏng: %s", w.Body.String())
+	}
+	saved, _ := e.app.store.TemplateByID("hkt_studio")
+	items := hkFlattenItems(&saved)
+	if len(items) != 1 || items[0].SamplePhoto != "/api/hk/photo/mau.jpg" {
+		t.Fatalf("ảnh mẫu phải được giữ: %+v", items)
+	}
+	if items[0].Hint != "Thấy cả 4 góc" {
+		t.Fatalf("mô tả yêu cầu phải được giữ: %q", items[0].Hint)
+	}
+}

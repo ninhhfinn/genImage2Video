@@ -78,11 +78,17 @@ type HKRoom struct {
 }
 
 type HKItem struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	RequirePhoto bool   `json:"require_photo"`
-	MinPhotos    int    `json:"min_photos,omitempty"`
-	Hint         string `json:"hint,omitempty"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// RequirePhoto luôn true — giữ trường để đọc được dữ liệu bản cũ, xem
+	// hkNormalizeTemplate.
+	RequirePhoto bool `json:"require_photo"`
+	MinPhotos    int  `json:"min_photos,omitempty"`
+	// Hint: mô tả yêu cầu — dọn xong phải trông thế nào, chụp góc nào.
+	Hint string `json:"hint,omitempty"`
+	// SamplePhoto: ảnh mẫu quản lý chụp sẵn, hiện ngay trên màn chụp của cô.
+	// Một tấm ảnh nói rõ "đạt yêu cầu là thế này" hơn ba dòng chữ mô tả.
+	SamplePhoto string `json:"sample_photo,omitempty"`
 }
 
 type HKGroup struct {

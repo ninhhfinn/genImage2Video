@@ -407,6 +407,49 @@ func (a *HKApp) handleRoomSettings(w http.ResponseWriter, r *http.Request) {
 	hkWriteJSON(w, http.StatusOK, map[string]interface{}{"room": room})
 }
 
+// handleApplyTemplate — áp dụng một mẫu checklist cho nhiều phòng cùng lúc.
+//
+// Không có nó thì quản lý phải mở từng phòng đổi tay; 60 phòng dùng chung một
+// mẫu là 60 lần bấm, và ai cũng sẽ bỏ dở giữa chừng rồi để lệch mẫu.
+func (a *HKApp) handleApplyTemplate(w http.ResponseWriter, r *http.Request) {
+	if !hkRequirePost(w, r) {
+		return
+	}
+	if _, err := a.hkRequireAdmin(r); err != nil {
+		hkFailAuth(w, err)
+		return
+	}
+	var body struct {
+		TemplateID string   `json:"template_id"`
+		RoomIDs    []string `json:"room_ids"`
+	}
+	if err := hkDecodeBody(r, &body); err != nil {
+		hkFail(w, http.StatusBadRequest, "Dữ liệu gửi lên không đọc được.")
+		return
+	}
+	if strings.TrimSpace(body.TemplateID) == "" {
+		hkFail(w, http.StatusBadRequest, "Chưa chọn mẫu checklist.")
+		return
+	}
+	if _, err := a.store.TemplateByID(body.TemplateID); err != nil {
+		hkFail(w, http.StatusNotFound, "Không tìm thấy mẫu checklist.")
+		return
+	}
+	if len(body.RoomIDs) == 0 {
+		hkFail(w, http.StatusBadRequest, "Chưa chọn phòng nào.")
+		return
+	}
+
+	n, err := a.store.SetRoomsTemplate(body.RoomIDs, body.TemplateID)
+	if err != nil {
+		hkFail(w, http.StatusInternalServerError, "Không lưu được thay đổi.")
+		return
+	}
+	// Ca ĐANG DỞ giữ nguyên mẫu cũ (bản chụp lúc tạo ca) — đổi giữa chừng là làm
+	// cô đang dọn bỗng thiếu ảnh cho mục chưa từng tồn tại lúc cô bắt đầu.
+	hkWriteJSON(w, http.StatusOK, map[string]interface{}{"updated": n})
+}
+
 // ─── Mẫu checklist ────────────────────────────────────────────────────────
 
 func (a *HKApp) handleTemplates(w http.ResponseWriter, r *http.Request) {
@@ -1041,6 +1084,7 @@ func (a *HKApp) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/hk/rooms/settings", a.handleRoomSettings)
 
 	mux.HandleFunc("/api/hk/templates", a.handleTemplates)
+	mux.HandleFunc("/api/hk/templates/apply", a.handleApplyTemplate)
 
 	mux.HandleFunc("/api/hk/sessions", a.handleSessions)
 	mux.HandleFunc("/api/hk/sessions/get", a.handleSessionGet)

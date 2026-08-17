@@ -81,6 +81,8 @@ export default function CaptureFlow({ session, onSessionChange, onExit }) {
 	// vào màn Xong.
 	const [view, setView] = useState('shoot')
 	const [note, setNote] = useState('')
+	// Ảnh mẫu phóng to — cô xem kỹ rồi đóng, không rời màn chụp.
+	const [zoomSample, setZoomSample] = useState('')
 	const fileRef = useRef(null)
 
 	const remaining = items.filter((it) => !isDone(it)).length
@@ -275,6 +277,16 @@ export default function CaptureFlow({ session, onSessionChange, onExit }) {
 				<div className="cap-group">{current.group}</div>
 				<h1 className="cap-title">{current.title}</h1>
 				{current.hint && <p className="cap-hint">{current.hint}</p>}
+
+				{/* Ảnh mẫu ngay trên màn chụp: một tấm ảnh nói rõ "đạt yêu cầu là thế
+				    này" hơn ba dòng chữ, và cô không phải đoán góc chụp. */}
+				{current.sample_photo && (
+					<button className="cap-sample" onClick={() => setZoomSample(photoSrc(current.sample_photo))}>
+						<img src={photoSrc(current.sample_photo)} alt="" />
+						<span>Ảnh mẫu — chạm để xem to</span>
+					</button>
+				)}
+
 				{need > 1 && (
 					<p className="cap-count">
 						Ảnh {have + 1} / {need}
@@ -288,6 +300,13 @@ export default function CaptureFlow({ session, onSessionChange, onExit }) {
 			</button>
 
 			<input ref={fileRef} type="file" accept={ACCEPT} capture="environment" hidden onChange={onPick} />
+
+			{zoomSample && (
+				<div className="lightbox" onClick={() => setZoomSample('')}>
+					<img src={zoomSample} alt="" />
+					<button className="lightbox-x" aria-label="Đóng">✕</button>
+				</div>
+			)}
 		</div>
 	)
 }

@@ -397,6 +397,36 @@ func (s *HKStore) UpdateRoomSettings(id, templateID, doorNote string) error {
 	return err
 }
 
+// SetRoomsTemplate gán một mẫu checklist cho nhiều phòng trong một giao dịch.
+func (s *HKStore) SetRoomsTemplate(roomIDs []string, templateID string) (int, error) {
+	if len(roomIDs) == 0 {
+		return 0, nil
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`UPDATE hk_room SET template_id = ? WHERE id = ?`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+	n := 0
+	for _, id := range roomIDs {
+		res, err := stmt.Exec(templateID, id)
+		if err != nil {
+			return n, err
+		}
+		if c, _ := res.RowsAffected(); c > 0 {
+			n++
+		}
+	}
+	return n, tx.Commit()
+}
+
 func (s *HKStore) ListRooms(onlyActive bool) ([]HKRoom, error) {
 	q := `SELECT ` + roomCols + ` FROM hk_room`
 	if onlyActive {

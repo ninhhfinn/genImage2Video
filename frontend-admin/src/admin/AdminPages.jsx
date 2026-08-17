@@ -1,7 +1,7 @@
 // Các màn của quản lý: điều phối ca, đối soát công, bảng công, nhân sự, phòng,
 // mẫu checklist.
 
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { api, photoSrc } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import { Link, useRouter } from '../router.jsx'
@@ -1027,6 +1027,7 @@ export function ChecklistPage() {
 	const [err, setErr] = useState('')
 	const [msg, setMsg] = useState('')
 	const [busy, setBusy] = useState(false)
+	const [applying, setApplying] = useState(false)
 
 	useEffect(() => {
 		api
@@ -1091,9 +1092,14 @@ export function ChecklistPage() {
 					<h1>Mẫu checklist</h1>
 					<p className="sub">Gán theo loại phòng. Ca đang dở vẫn dùng mẫu lúc tạo, nên sửa ở đây không làm mất ảnh của ai.</p>
 				</div>
-				<button className="btn btn--primary" onClick={save} disabled={busy}>
-					{busy ? 'Đang lưu…' : 'Lưu mẫu'}
-				</button>
+				<div className="row-actions">
+					<button className="btn btn--ghost" onClick={() => setApplying(true)}>
+						Áp dụng cho phòng khác
+					</button>
+					<button className="btn btn--primary" onClick={save} disabled={busy}>
+						{busy ? 'Đang lưu…' : 'Lưu mẫu'}
+					</button>
+				</div>
 			</div>
 
 			<div className="tabs">
@@ -1140,47 +1146,17 @@ export function ChecklistPage() {
 					</div>
 
 					{g.items.map((it) => (
-						<div key={it.id} className="item-edit">
-							<input
-								placeholder="Tên việc, VD: Thay ga gối mới"
-								value={it.title}
-								onChange={(e) => patchItem(g.id, it.id, { title: e.target.value })}
-							/>
-							<input
-								placeholder="Gợi ý cho cô (không bắt buộc)"
-								value={it.hint || ''}
-								onChange={(e) => patchItem(g.id, it.id, { hint: e.target.value })}
-							/>
-							<label className="check-inline">
-								<input
-									type="checkbox"
-									checked={!!it.require_photo}
-									onChange={(e) => patchItem(g.id, it.id, { require_photo: e.target.checked })}
-								/>
-								<span>Bắt buộc ảnh</span>
-							</label>
-							<input
-								className="w-num"
-								type="number"
-								min="1"
-								max="6"
-								title="Số ảnh tối thiểu"
-								disabled={!it.require_photo}
-								value={it.min_photos || 1}
-								onChange={(e) => patchItem(g.id, it.id, { min_photos: Number(e.target.value) || 1 })}
-							/>
-							<button
-								className="btn btn--ghost"
-								onClick={() =>
-									setDraft((d) => ({
-										...d,
-										groups: d.groups.map((x) => (x.id === g.id ? { ...x, items: x.items.filter((y) => y.id !== it.id) } : x)),
-									}))
-								}
-							>
-								✕
-							</button>
-						</div>
+						<ItemEditor
+							key={it.id}
+							item={it}
+							onPatch={(patch) => patchItem(g.id, it.id, patch)}
+							onRemove={() =>
+								setDraft((d) => ({
+									...d,
+									groups: d.groups.map((x) => (x.id === g.id ? { ...x, items: x.items.filter((y) => y.id !== it.id) } : x)),
+								}))
+							}
+						/>
 					))}
 
 					<button
@@ -1207,6 +1183,176 @@ export function ChecklistPage() {
 			>
 				+ Thêm nhóm việc
 			</button>
+
+			{applying && (
+				<ApplyTemplateModal
+					template={draft}
+					onClose={() => setApplying(false)}
+					onDone={(n) => {
+						setApplying(false)
+						setMsg(`Đã áp dụng mẫu "${draft.name}" cho ${n} phòng.`)
+					}}
+				/>
+			)}
 		</AdminShell>
+	)
+}
+
+/** Một dòng sửa mục việc: tên, yêu cầu, số ảnh, và ẢNH MẪU. */
+function ItemEditor({ item, onPatch, onRemove }) {
+	const [uploading, setUploading] = useState(false)
+	const fileRef = useRef(null)
+
+	async function pickSample(e) {
+		const file = e.target.files?.[0]
+		e.target.value = ''
+		if (!file) return
+		setUploading(true)
+		try {
+			const res = await api.uploadPhoto(file)
+			onPatch({ sample_photo: res.url })
+		} catch {
+			/* lỗi mạng: không đổi gì, quản lý bấm lại */
+		} finally {
+			setUploading(false)
+		}
+	}
+
+	return (
+		<div className="item-edit2">
+			<div className="item-edit2-main">
+				<input
+					className="title-input"
+					placeholder="Tên việc, VD: Thay ga gối mới"
+					value={item.title}
+					onChange={(e) => onPatch({ title: e.target.value })}
+				/>
+				{/* Mô tả yêu cầu là thứ cô đọc lúc đứng trong phòng — cho nó chỗ rộng,
+				    không phải một ô nhỏ cùng hàng với mấy nút khác. */}
+				<textarea
+					rows="2"
+					placeholder="Yêu cầu: dọn xong phải trông thế nào, chụp góc nào. VD: chụp giường đã trải xong, thấy cả 4 góc"
+					value={item.hint || ''}
+					onChange={(e) => onPatch({ hint: e.target.value })}
+				/>
+				<div className="item-edit2-foot">
+					<label className="check-inline">
+						Số ảnh tối thiểu
+						<input
+							className="w-num"
+							type="number"
+							min="1"
+							max="6"
+							value={item.min_photos || 1}
+							onChange={(e) => onPatch({ min_photos: Number(e.target.value) || 1 })}
+						/>
+					</label>
+					<button className="btn btn--ghost" onClick={onRemove}>Xoá việc</button>
+				</div>
+			</div>
+
+			{/* Ảnh mẫu: một tấm ảnh nói rõ "đạt yêu cầu là thế này" hơn ba dòng chữ. */}
+			<div className="sample">
+				{item.sample_photo ? (
+					<>
+						<img src={photoSrc(item.sample_photo)} alt="" />
+						<button className="btn btn--ghost" onClick={() => onPatch({ sample_photo: '' })}>Bỏ ảnh mẫu</button>
+					</>
+				) : (
+					<button className="sample-add" onClick={() => fileRef.current?.click()} disabled={uploading}>
+						{uploading ? 'Đang tải…' : '+ Ảnh mẫu'}
+					</button>
+				)}
+				<input ref={fileRef} type="file" accept="image/*" hidden onChange={pickSample} />
+			</div>
+		</div>
+	)
+}
+
+/** Chọn nhiều phòng để áp dụng cùng một mẫu. */
+function ApplyTemplateModal({ template, onClose, onDone }) {
+	const [rooms, setRooms] = useState(null)
+	const [picked, setPicked] = useState([])
+	const [zone, setZone] = useState('')
+	const [busy, setBusy] = useState(false)
+	const [err, setErr] = useState('')
+
+	useEffect(() => {
+		api.rooms().then((d) => setRooms(d.rooms || [])).catch((e) => setErr(e.message))
+	}, [])
+
+	const list = (rooms || []).filter((r) => !zone || r.zone === zone)
+	const zones = [...new Set((rooms || []).map((r) => r.zone).filter(Boolean))].sort()
+	const allPicked = list.length > 0 && list.every((r) => picked.includes(r.id))
+
+	async function apply() {
+		setBusy(true)
+		setErr('')
+		try {
+			const d = await api.applyTemplate(template.id, picked)
+			onDone(d.updated)
+		} catch (e) {
+			setErr(e.message)
+		} finally {
+			setBusy(false)
+		}
+	}
+
+	return (
+		<div className="modal" onClick={onClose}>
+			<div className="modal-in modal-in--wide" onClick={(e) => e.stopPropagation()}>
+				<h2>Áp dụng “{template.name}” cho phòng khác</h2>
+				<p className="sub">
+					Phòng đã chọn sẽ dùng mẫu này từ ca tạo sau đó. Ca đang dở giữ nguyên mẫu cũ để không mất ảnh của ai.
+				</p>
+
+				<div className="row-actions">
+					<select value={zone} onChange={(e) => setZone(e.target.value)}>
+						<option value="">Tất cả khu vực</option>
+						{zones.map((z) => (
+							<option key={z} value={z}>{z}</option>
+						))}
+					</select>
+					<button
+						className="btn btn--ghost"
+						onClick={() =>
+							setPicked(allPicked ? picked.filter((id) => !list.some((r) => r.id === id)) : [...new Set([...picked, ...list.map((r) => r.id)])])
+						}
+					>
+						{allPicked ? 'Bỏ chọn hết' : `Chọn hết (${list.length})`}
+					</button>
+					<span className="meta">Đã chọn {picked.length} phòng</span>
+				</div>
+
+				<Alert>{err}</Alert>
+
+				{rooms === null ? (
+					<Spinner />
+				) : (
+					<div className="pick-list">
+						{list.map((r) => (
+							<label key={r.id} className={`pick${picked.includes(r.id) ? ' pick--on' : ''}`}>
+								<input
+									type="checkbox"
+									checked={picked.includes(r.id)}
+									onChange={(e) =>
+										setPicked(e.target.checked ? [...picked, r.id] : picked.filter((x) => x !== r.id))
+									}
+								/>
+								<span className="pick-name">{r.name}</span>
+								<span className="meta">{r.code} · {r.zone} · {ROOM_TYPE_LABEL[r.room_type] || r.room_type}</span>
+							</label>
+						))}
+					</div>
+				)}
+
+				<div className="modal-actions">
+					<button className="btn btn--ghost" onClick={onClose}>Huỷ</button>
+					<button className="btn btn--primary" disabled={busy || !picked.length} onClick={apply}>
+						{busy ? 'Đang áp dụng…' : `Áp dụng cho ${picked.length} phòng`}
+					</button>
+				</div>
+			</div>
+		</div>
 	)
 }
