@@ -12,6 +12,7 @@ import { useAuth } from '../auth.jsx'
 import { useRouter } from '../router.jsx'
 import PhotoUploader from '../components/PhotoUploader.jsx'
 import { Alert, Empty, Progress, Spinner } from '../components/ui.jsx'
+import { ReviewFilters, defaultReviewFilter, reviewQuery } from '../components/ReviewFilters.jsx'
 import {
 	ROOM_TYPE_LABEL,
 	SESSION_LABEL,
@@ -346,8 +347,13 @@ function isDone(session, item) {
 export function CleanerMePage() {
 	const [day, setDay] = useState(dayKey())
 	const [data, setData] = useState(null)
-	const [reviews, setReviews] = useState(null)
 	const [err, setErr] = useState('')
+
+	// Bộ lọc đánh giá tách riêng khỏi ô chọn ngày của phần số liệu: cô xem hiệu
+	// suất của MỘT ngày, nhưng đánh giá thì nhìn cả tháng mới thấy xu hướng.
+	const [filter, setFilter] = useState(defaultReviewFilter)
+	const [reviews, setReviews] = useState(null)
+	const [showFilter, setShowFilter] = useState(false)
 
 	useEffect(() => {
 		setData(null)
@@ -361,12 +367,19 @@ export function CleanerMePage() {
 	}, [day])
 
 	useEffect(() => {
-		api.reviews(14).then(setReviews).catch(() => setReviews({ stats: null }))
-	}, [])
+		setReviews(null)
+		api
+			.reviews(reviewQuery(filter))
+			.then(setReviews)
+			.catch(() => setReviews({ stats: null, reviews: [] }))
+	}, [filter])
 
 	const row = data?.rows?.[0]
 	const today = dayKey()
 	const st = reviews?.stats
+	const list = reviews?.reviews || []
+	const activeFilters =
+		(filter.room_id ? 1 : 0) + (filter.facility_id ? 1 : 0) + (filter.stars || []).length
 
 	return (
 		<CleanerShell active="me" title="Kết quả của tôi">
@@ -406,46 +419,49 @@ export function CleanerMePage() {
 
 			{/* Review là thước đo trực tiếp nhất việc dọn dẹp — cho cô thấy để tự
 			    cải thiện, không phải để quản lý giữ riêng làm cơ sở khiển trách. */}
-			<h2 className="mob-h2">Khách đánh giá (14 ngày qua)</h2>
+			<div className="mob-h2-row">
+				<h2 className="mob-h2">Khách đánh giá</h2>
+				<button className="btn btn--ghost" onClick={() => setShowFilter((v) => !v)}>
+					Lọc{activeFilters ? ` (${activeFilters})` : ''} {showFilter ? '⌃' : '⌄'}
+				</button>
+			</div>
+
+			{/* Bộ lọc gập lại mặc định: màn điện thoại chật, mở sẵn thì đẩy hết đánh
+			    giá xuống dưới màn và cô phải cuộn mới thấy thứ mình cần xem. */}
+			{showFilter && (
+				<ReviewFilters
+					compact
+					value={filter}
+					onChange={setFilter}
+					rooms={reviews?.rooms || []}
+					facilities={reviews?.facilities || []}
+					starCounts={reviews?.star_counts || {}}
+				/>
+			)}
+
 			{reviews === null ? (
 				<Spinner />
-			) : !st || !st.total ? (
-				<Empty icon="⭐">Chưa có đánh giá mới.</Empty>
+			) : !list.length ? (
+				<Empty icon="⭐">Không có đánh giá nào khớp bộ lọc.</Empty>
 			) : (
 				<>
 					<div className="mob-sum">
 						<div>
-							<strong>{st.avg_cleanliness ? st.avg_cleanliness.toFixed(1) : '—'}</strong>
+							<strong>{st?.avg_cleanliness ? st.avg_cleanliness.toFixed(1) : '—'}</strong>
 							<span>điểm sạch sẽ trung bình</span>
 						</div>
 						<div>
-							<strong>{st.low_clean}</strong>
+							<strong>{st?.low_clean || 0}</strong>
 							<span>lượt chê chưa sạch</span>
 						</div>
 					</div>
 
-					{st.need_attention?.length > 0 && (
-						<>
-							<h2 className="mob-h2">Cần chú ý</h2>
-							<div className="mob-list">
-								{st.need_attention.slice(0, 5).map((r) => (
-									<div key={r.id} className="rv rv--bad">
-										<div className="rv-top">
-											<span>{'⭐'.repeat(Math.max(1, r.cleanliness || r.overall))}</span>
-											<span className="rv-room">{r.room_code}</span>
-											<span className="rv-date">{dayMonth(r.created_at)}</span>
-										</div>
-										{r.comment && <div className="rv-text">{r.comment}</div>}
-									</div>
-								))}
-							</div>
-						</>
-					)}
-
-					<h2 className="mob-h2">Đánh giá gần đây</h2>
 					<div className="mob-list">
-						{st.recent.slice(0, 8).map((r) => (
-							<div key={r.id} className={`rv${r.overall >= 4 ? ' rv--good' : ''}`}>
+						{list.map((r) => (
+							<div
+								key={r.id}
+								className={`rv${r.overall >= 4 ? ' rv--good' : ''}${r.cleanliness > 0 && r.cleanliness <= 3 ? ' rv--bad' : ''}`}
+							>
 								<div className="rv-top">
 									<span>{'⭐'.repeat(Math.max(1, r.overall))}</span>
 									<span className="rv-room">{r.room_code}</span>

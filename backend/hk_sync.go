@@ -72,6 +72,8 @@ type hkRawListing struct {
 	CheckoutHour int            `json:"checkout_hour"`
 	CheckinGuide hkCheckinGuide `json:"checkin_guide"`
 	CleanTime    int            `json:"clean_time"` // đệm dọn dẹp giữa hai lượt khách, giờ
+	FacilityID   int            `json:"facility_id"`
+	Street       string         `json:"street"`
 	Status       string         `json:"status"`
 	Host         hkListingHost  `json:"host"`
 }
@@ -131,6 +133,10 @@ func (a *HKApp) hkSyncRooms(limit int) (added, updated int, err error) {
 
 	ts := hkNowMs()
 	skipped := 0
+
+	// Giải mã trước toàn bộ để suy được nhãn cơ sở từ địa chỉ chung của các phòng
+	// cùng mã cơ sở. Dayladau chỉ trả mã số (facility_id), không trả tên.
+	var parsed []hkRawListing
 	for _, rawItem := range resp.Listings {
 		var l hkRawListing
 		if err := json.Unmarshal(rawItem, &l); err != nil {
@@ -142,6 +148,11 @@ func (a *HKApp) hkSyncRooms(limit int) (added, updated int, err error) {
 			skipped++
 			continue
 		}
+		parsed = append(parsed, l)
+	}
+	facilityLabels := hkFacilityLabels(parsed)
+
+	for _, l := range parsed {
 		roomType := hkRoomTypeFromBedrooms(l.Bedrooms)
 		room := HKRoom{
 			ID:         l.ID,
@@ -156,6 +167,8 @@ func (a *HKApp) hkSyncRooms(limit int) (added, updated int, err error) {
 			TemplateID: hkTemplateForRoomType(templates, roomType),
 			DoorNote:   hkTrimGuide(l.CheckinGuide.plainText()),
 			CleanTime:  hkHourOr(l.CleanTime, 1),
+			FacilityID: l.FacilityID,
+			FacilityLabel: facilityLabels[l.FacilityID],
 			CheckinHr:  hkHourOr(l.CheckinHour, 14),
 			CheckoutHr: hkHourOr(l.CheckoutHour, 11),
 			Active:     true,
@@ -430,4 +443,61 @@ func (a *HKApp) hkSuggestStaff(zone string) string {
 		}
 	}
 	return ""
+}
+
+// hkFacilityLabels suy tên gọi cho từng cơ sở từ địa chỉ chung của các phòng
+// thuộc cơ sở đó.
+//
+// Dayladau chỉ trả `facility_id` (số), không trả tên, và endpoint danh sách cơ sở
+// đòi token. Nhưng các phòng cùng một cơ sở thì cùng toà/cùng ngõ, nên tên phố
+// xuất hiện nhiều nhất là nhãn dùng được. "Ngõ 387 Vũ Tông Phan" thì người vận
+// hành biết ngay là chỗ nào, còn "Cơ sở #309" thì không.
+func hkFacilityLabels(listings []hkRawListing) map[int]string {
+	streets := map[int]map[string]int{}
+	districts := map[int]map[string]int{}
+	for _, l := range listings {
+		if l.FacilityID <= 0 {
+			continue
+		}
+		if st := strings.TrimSpace(l.Street); st != "" {
+			if streets[l.FacilityID] == nil {
+				streets[l.FacilityID] = map[string]int{}
+			}
+			streets[l.FacilityID][st]++
+		}
+		if d := strings.TrimSpace(l.District); d != "" {
+			if districts[l.FacilityID] == nil {
+				districts[l.FacilityID] = map[string]int{}
+			}
+			districts[l.FacilityID][d]++
+		}
+	}
+
+	out := map[int]string{}
+	for fid := range streets {
+		label := hkMostCommon(streets[fid])
+		if d := hkMostCommon(districts[fid]); d != "" && !strings.Contains(label, d) {
+			label += ", " + d
+		}
+		out[fid] = label
+	}
+	// Cơ sở chỉ có mã mà không có địa chỉ nào: vẫn phải có nhãn để lọc được.
+	for fid := range districts {
+		if out[fid] == "" {
+			out[fid] = hkMostCommon(districts[fid])
+		}
+	}
+	return out
+}
+
+func hkMostCommon(m map[string]int) string {
+	best, bestN := "", 0
+	for k, n := range m {
+		// Bằng phiếu thì lấy chuỗi nhỏ hơn theo alphabet để nhãn ổn định giữa các
+		// lần đồng bộ — nhãn nhảy lung tung làm bộ lọc đã chọn bị mất.
+		if n > bestN || (n == bestN && k < best) {
+			best, bestN = k, n
+		}
+	}
+	return best
 }

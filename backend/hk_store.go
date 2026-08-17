@@ -95,6 +95,8 @@ func (s *HKStore) migrate() error {
 			template_id TEXT NOT NULL DEFAULT '',
 			door_note TEXT NOT NULL DEFAULT '',
 			clean_time INTEGER NOT NULL DEFAULT 1,
+			facility_id INTEGER NOT NULL DEFAULT 0,
+			facility_label TEXT NOT NULL DEFAULT '',
 			checkin_hour INTEGER NOT NULL DEFAULT 14,
 			checkout_hour INTEGER NOT NULL DEFAULT 11,
 			active INTEGER NOT NULL DEFAULT 1,
@@ -131,6 +133,25 @@ func (s *HKStore) migrate() error {
 		`CREATE INDEX IF NOT EXISTS hk_session_day ON hk_session(day)`,
 		`CREATE INDEX IF NOT EXISTS hk_session_staff ON hk_session(staff_id)`,
 		`CREATE INDEX IF NOT EXISTS hk_session_checkout ON hk_session(checkout_at)`,
+		`CREATE TABLE IF NOT EXISTS hk_review (
+			id TEXT PRIMARY KEY,
+			listing_id TEXT NOT NULL DEFAULT '',
+			room_id TEXT NOT NULL DEFAULT '',
+			room_code TEXT NOT NULL DEFAULT '',
+			room_name TEXT NOT NULL DEFAULT '',
+			facility_id INTEGER NOT NULL DEFAULT 0,
+			facility_label TEXT NOT NULL DEFAULT '',
+			overall INTEGER NOT NULL DEFAULT 0,
+			cleanliness INTEGER NOT NULL DEFAULT 0,
+			comment TEXT NOT NULL DEFAULT '',
+			guest_name TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL DEFAULT 0,
+			about_cleaning INTEGER NOT NULL DEFAULT 0,
+			synced_at INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE INDEX IF NOT EXISTS hk_review_created ON hk_review(created_at)`,
+		`CREATE INDEX IF NOT EXISTS hk_review_room ON hk_review(room_id)`,
+		`CREATE INDEX IF NOT EXISTS hk_review_facility ON hk_review(facility_id)`,
 		// Một phòng chỉ có một ca mỗi ngày — chặn ở tầng DB để job đồng bộ chạy hai
 		// lần không đẻ ra hai ca, kéo theo trả tiền hai lần.
 		// Khoá chống trùng là MÃ LƯỢT ĐẶT, không phải (phòng, ngày): 59/60 phòng
@@ -143,7 +164,64 @@ func (s *HKStore) migrate() error {
 			return fmt.Errorf("migrate: %w (%s)", err, firstLineOf(q))
 		}
 	}
+	return s.addMissingColumns()
+}
+
+// addMissingColumns thêm cột mới vào bảng ĐÃ TỒN TẠI.
+//
+// `CREATE TABLE IF NOT EXISTS` chỉ tạo bảng lần đầu; máy nào đã chạy bản cũ thì
+// bảng vẫn thiếu cột mới và mọi truy vấn hỏng với "no such column". Đây là lỗi
+// gặp thật khi thêm cột cơ sở: máy dev vẫn chạy vì DB mới, còn máy đã test thì
+// hỏng ngay.
+//
+// SQLite không có "ADD COLUMN IF NOT EXISTS" nên phải hỏi PRAGMA trước.
+func (s *HKStore) addMissingColumns() error {
+	wanted := map[string]map[string]string{
+		"hk_room": {
+			"clean_time":     "INTEGER NOT NULL DEFAULT 1",
+			"facility_id":    "INTEGER NOT NULL DEFAULT 0",
+			"facility_label": "TEXT NOT NULL DEFAULT ''",
+		},
+		"hk_session": {
+			"booking_uid": "TEXT NOT NULL DEFAULT ''",
+		},
+	}
+	for table, cols := range wanted {
+		have, err := s.columnsOf(table)
+		if err != nil {
+			return err
+		}
+		if len(have) == 0 {
+			continue // bảng chưa tồn tại; phần CREATE ở trên lo
+		}
+		for name, decl := range cols {
+			if have[name] {
+				continue
+			}
+			stmt := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, name, decl)
+			if _, err := s.db.Exec(stmt); err != nil {
+				return fmt.Errorf("thêm cột %s.%s: %w", table, name, err)
+			}
+		}
+	}
 	return nil
+}
+
+func (s *HKStore) columnsOf(table string) (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out[n] = true
+	}
+	return out, rows.Err()
 }
 
 func firstLineOf(q string) string {
@@ -273,13 +351,13 @@ func (s *HKStore) PurgeExpiredTokens(now int64) error {
 // ─── Phòng ────────────────────────────────────────────────────────────────
 
 const roomCols = `id, listing_id, code, name, address, zone, room_type, host_id, host_name,
-	template_id, door_note, clean_time, checkin_hour, checkout_hour, active, synced_at`
+	template_id, door_note, clean_time, facility_id, facility_label, checkin_hour, checkout_hour, active, synced_at`
 
 func scanRoom(row interface{ Scan(...interface{}) error }) (HKRoom, error) {
 	var r HKRoom
 	var active int
 	err := row.Scan(&r.ID, &r.ListingID, &r.Code, &r.Name, &r.Address, &r.Zone, &r.RoomType,
-		&r.HostID, &r.HostName, &r.TemplateID, &r.DoorNote, &r.CleanTime,
+		&r.HostID, &r.HostName, &r.TemplateID, &r.DoorNote, &r.CleanTime, &r.FacilityID, &r.FacilityLabel,
 		&r.CheckinHr, &r.CheckoutHr, &active, &r.SyncedAt)
 	r.Active = active != 0
 	return r, err
@@ -296,15 +374,16 @@ func (s *HKStore) UpsertRoom(r HKRoom) error {
 		active = 1
 	}
 	_, err := s.db.Exec(`
-		INSERT INTO hk_room (`+roomCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO hk_room (`+roomCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 			listing_id=excluded.listing_id, code=excluded.code, name=excluded.name,
 			address=excluded.address, zone=excluded.zone, room_type=excluded.room_type,
 			host_id=excluded.host_id, host_name=excluded.host_name,
 			checkin_hour=excluded.checkin_hour, checkout_hour=excluded.checkout_hour,
+			facility_id=excluded.facility_id, facility_label=excluded.facility_label,
 			active=excluded.active, synced_at=excluded.synced_at`,
 		r.ID, r.ListingID, r.Code, r.Name, r.Address, r.Zone, r.RoomType, r.HostID, r.HostName,
-		r.TemplateID, r.DoorNote, r.CleanTime, r.CheckinHr, r.CheckoutHr, active, r.SyncedAt)
+		r.TemplateID, r.DoorNote, r.CleanTime, r.FacilityID, r.FacilityLabel, r.CheckinHr, r.CheckoutHr, active, r.SyncedAt)
 	return err
 }
 
@@ -560,3 +639,116 @@ func (s *HKStore) CountRows(table string) (int, error) {
 }
 
 func hkNowMs() int64 { return time.Now().UnixMilli() }
+
+// ─── Đánh giá của khách (cache) ───────────────────────────────────────────
+//
+// Lưu lại thay vì mỗi lần lọc lại gọi 60 request sang Dayladau: người dùng đổi
+// bộ lọc liên tục, và chờ vài giây mỗi lần bấm thì không ai dùng bộ lọc nữa.
+
+func (s *HKStore) UpsertReviews(list []HKReview, now int64) (int, error) {
+	if len(list) == 0 {
+		return 0, nil
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`
+		INSERT INTO hk_review (id, listing_id, room_id, room_code, room_name, facility_id, facility_label,
+			overall, cleanliness, comment, guest_name, created_at, about_cleaning, synced_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET
+			room_id=excluded.room_id, room_code=excluded.room_code, room_name=excluded.room_name,
+			facility_id=excluded.facility_id, facility_label=excluded.facility_label,
+			overall=excluded.overall, cleanliness=excluded.cleanliness, comment=excluded.comment,
+			about_cleaning=excluded.about_cleaning, synced_at=excluded.synced_at`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	n := 0
+	for _, r := range list {
+		about := 0
+		if r.AboutCleaning {
+			about = 1
+		}
+		if _, err := stmt.Exec(r.ID, r.ListingID, r.RoomID, r.RoomCode, r.ListingName,
+			r.FacilityID, r.FacilityLabel, r.Overall, r.Cleanliness, r.Comment,
+			r.GuestName, r.CreatedAt, about, now); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, tx.Commit()
+}
+
+type HKReviewFilter struct {
+	RoomID     string
+	FacilityID int
+	From       int64
+	To         int64
+	Stars      []int // rỗng = mọi mức sao
+}
+
+func (s *HKStore) ListReviews(f HKReviewFilter) ([]HKReview, error) {
+	q := `SELECT id, listing_id, room_id, room_code, room_name, facility_id, facility_label,
+		overall, cleanliness, comment, guest_name, created_at, about_cleaning
+		FROM hk_review WHERE 1=1`
+	var args []interface{}
+	if f.RoomID != "" {
+		q += ` AND room_id = ?`
+		args = append(args, f.RoomID)
+	}
+	if f.FacilityID > 0 {
+		q += ` AND facility_id = ?`
+		args = append(args, f.FacilityID)
+	}
+	if f.From > 0 {
+		q += ` AND created_at >= ?`
+		args = append(args, f.From)
+	}
+	if f.To > 0 {
+		q += ` AND created_at <= ?`
+		args = append(args, f.To)
+	}
+	if len(f.Stars) > 0 {
+		// Chip sao lọc theo ĐIỂM CHUNG (overall) — đó là con số khách nhìn thấy và
+		// là con số quản lý nói tới khi bảo "đơn 1 sao".
+		q += ` AND overall IN (` + strings.TrimSuffix(strings.Repeat("?,", len(f.Stars)), ",") + `)`
+		for _, st := range f.Stars {
+			args = append(args, st)
+		}
+	}
+	q += ` ORDER BY created_at DESC`
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HKReview{}
+	for rows.Next() {
+		var r HKReview
+		var about int
+		if err := rows.Scan(&r.ID, &r.ListingID, &r.RoomID, &r.RoomCode, &r.ListingName,
+			&r.FacilityID, &r.FacilityLabel, &r.Overall, &r.Cleanliness, &r.Comment,
+			&r.GuestName, &r.CreatedAt, &about); err != nil {
+			return nil, err
+		}
+		r.AboutCleaning = about != 0
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// LastReviewSync — lần đồng bộ đánh giá gần nhất, để màn hình nói rõ số liệu cũ
+// tới mức nào thay vì để người dùng đoán.
+func (s *HKStore) LastReviewSync() int64 {
+	var n int64
+	s.db.QueryRow(`SELECT COALESCE(MAX(synced_at), 0) FROM hk_review`).Scan(&n)
+	return n
+}

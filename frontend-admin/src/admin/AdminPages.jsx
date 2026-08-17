@@ -7,6 +7,7 @@ import { useAuth } from '../auth.jsx'
 import { Link, useRouter } from '../router.jsx'
 import { Alert, Empty, Progress, SessionBadge, Spinner, StaffBadge, Stat } from '../components/ui.jsx'
 import { ROOM_TYPE_LABEL, dayKey, dayLabel, dayMonth, hour, minutes, shiftDay } from '../format.js'
+import { ReviewFilters, defaultReviewFilter, reviewQuery } from '../components/ReviewFilters.jsx'
 
 const TABS = [
 	{ key: 'board', label: 'Ca dọn', icon: '📋', to: '/' },
@@ -631,49 +632,81 @@ export function ReportPage() {
 // để quản lý không phải đọc hết vài trăm đánh giá chung chung.
 
 export function ReviewsPage() {
-	const [days, setDays] = useState(30)
+	const [filter, setFilter] = useState(defaultReviewFilter)
 	const [data, setData] = useState(null)
 	const [err, setErr] = useState('')
+	const [syncing, setSyncing] = useState(false)
+	const [msg, setMsg] = useState('')
+
+	async function load(f) {
+		setData(null)
+		try {
+			setData(await api.reviews(reviewQuery(f)))
+			setErr('')
+		} catch (e) {
+			setErr(e.message)
+			setData({ stats: null, reviews: [] })
+		}
+	}
 
 	useEffect(() => {
-		setData(null)
-		api
-			.reviews(days)
-			.then(setData)
-			.catch((e) => {
-				setErr(e.message)
-				setData({ stats: null })
-			})
-	}, [days])
+		load(filter)
+	}, [filter])
+
+	async function sync() {
+		setSyncing(true)
+		setErr('')
+		setMsg('')
+		try {
+			const d = await api.syncReviews(180)
+			setMsg(`Đã tải về ${d.synced} đánh giá từ Dayladau.`)
+			await load(filter)
+		} catch (e) {
+			setErr(e.message)
+		} finally {
+			setSyncing(false)
+		}
+	}
 
 	const st = data?.stats
+	const list = data?.reviews || []
 
 	return (
 		<AdminShell active="reviews">
 			<div className="page-head">
 				<div>
 					<h1>Đánh giá của khách</h1>
-					<p className="sub">Lấy trực tiếp từ Dayladau. Các cô cũng xem được phần này trên điện thoại.</p>
+					<p className="sub">
+						Lấy từ Dayladau. Các cô cũng xem và lọc được phần này trên điện thoại.
+						{data?.last_sync_at ? ` Cập nhật lần cuối ${dayMonth(data.last_sync_at)} ${hour(data.last_sync_at)}.` : ''}
+					</p>
 				</div>
-				<div className="row-actions">
-					{[7, 30, 90].map((d) => (
-						<button key={d} className={`btn${days === d ? ' btn--primary' : ' btn--ghost'}`} onClick={() => setDays(d)}>
-							{d} ngày
-						</button>
-					))}
-				</div>
+				<button className="btn btn--primary" disabled={syncing} onClick={sync}>
+					{syncing ? 'Đang tải…' : 'Tải đánh giá mới'}
+				</button>
 			</div>
 
+			<ReviewFilters
+				value={filter}
+				onChange={setFilter}
+				rooms={data?.rooms || []}
+				facilities={data?.facilities || []}
+				starCounts={data?.star_counts || {}}
+			/>
+
 			<Alert>{err}</Alert>
+			{msg && <Alert tone="ok">{msg}</Alert>}
 
 			{data === null ? (
 				<Spinner />
-			) : !st || !st.total ? (
-				<Empty icon="⭐">Chưa có đánh giá nào trong khoảng này.</Empty>
+			) : !list.length ? (
+				<Empty icon="⭐">
+					Không có đánh giá nào khớp bộ lọc. Chưa tải bao giờ thì bấm “Tải đánh giá mới”.
+				</Empty>
 			) : (
 				<>
 					<div className="stats">
-						<Stat label="Tổng đánh giá" value={st.total} />
+						<Stat label="Đánh giá khớp lọc" value={st.total} />
 						<Stat label="Điểm sạch sẽ TB" value={st.avg_cleanliness ? st.avg_cleanliness.toFixed(2) : '—'}
 							tone={st.avg_cleanliness && st.avg_cleanliness < 4.5 ? 'warn' : 'ok'} />
 						<Stat label="Điểm chung TB" value={st.avg_overall ? st.avg_overall.toFixed(2) : '—'} />
@@ -686,35 +719,38 @@ export function ReviewsPage() {
 						<div className="card pad">
 							<h2>Cần xử lý</h2>
 							{st.need_attention.map((r) => (
-								<div key={r.id} className="rv rv--bad">
-									<div className="rv-top">
-										<span>{'⭐'.repeat(Math.max(1, r.cleanliness || r.overall))}</span>
-										<span className="rv-room">{r.room_code} · {r.listing_name}</span>
-										<span className="rv-date">{dayMonth(r.created_at)}</span>
-									</div>
-									{r.comment && <div className="rv-text">{r.comment}</div>}
-								</div>
+								<ReviewRow key={r.id} r={r} />
 							))}
 						</div>
 					)}
 
 					<div className="card pad">
-						<h2>Gần đây</h2>
-						{st.recent.map((r) => (
-							<div key={r.id} className={`rv${r.overall >= 4 ? ' rv--good' : ''}`}>
-								<div className="rv-top">
-									<span>{'⭐'.repeat(Math.max(1, r.overall))}</span>
-									<span className="rv-room">{r.room_code} · {r.listing_name}</span>
-									<span className="rv-date">{dayMonth(r.created_at)}</span>
-									{r.about_cleaning && <span className="tag">nhắc dọn dẹp</span>}
-								</div>
-								{r.comment && <div className="rv-text">{r.comment}</div>}
-							</div>
+						<h2>Tất cả ({list.length})</h2>
+						{list.map((r) => (
+							<ReviewRow key={r.id} r={r} />
 						))}
 					</div>
 				</>
 			)}
 		</AdminShell>
+	)
+}
+
+function ReviewRow({ r }) {
+	return (
+		<div className={`rv${r.overall >= 4 ? ' rv--good' : ''}${r.cleanliness > 0 && r.cleanliness <= 3 ? ' rv--bad' : ''}`}>
+			<div className="rv-top">
+				<span>{'⭐'.repeat(Math.max(1, r.overall))}</span>
+				<span className="rv-room">
+					{r.room_code} · {r.listing_name}
+				</span>
+				{r.facility_label && <span className="tag">{r.facility_label}</span>}
+				{r.cleanliness > 0 && <span className="tag">sạch sẽ {r.cleanliness}/5</span>}
+				{r.about_cleaning && <span className="tag tag--danger">nhắc dọn dẹp</span>}
+				<span className="rv-date">{dayMonth(r.created_at)}</span>
+			</div>
+			{r.comment && <div className="rv-text">{r.comment}</div>}
+		</div>
 	)
 }
 

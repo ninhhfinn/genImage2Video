@@ -117,7 +117,8 @@ export const api = {
 		const q = day ? 'day=' + encodeURIComponent(day) : 'month=' + encodeURIComponent(month)
 		return get('/api/hk/report?' + q)
 	},
-	reviews: (days = 30) => get('/api/hk/reviews?days=' + days),
+	reviews: (query = '') => get('/api/hk/reviews' + (query ? '?' + query : '')),
+	syncReviews: (days) => post('/api/hk/reviews/sync', { days }),
 
 	uploadPhoto: (file) => {
 		const fd = new FormData()

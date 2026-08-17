@@ -263,3 +263,68 @@ func TestParseTimeMs(t *testing.T) {
 		t.Fatalf("giá trị hỏng phải trả 0, được %d", got)
 	}
 }
+
+// ─── Nhãn cơ sở ───────────────────────────────────────────────────────────
+
+// Dayladau chỉ trả mã cơ sở, không trả tên. Nhãn suy từ địa chỉ chung để người
+// vận hành đọc ra chỗ nào, thay vì "Cơ sở #309".
+func TestFacilityLabels(t *testing.T) {
+	labels := hkFacilityLabels([]hkRawListing{
+		{FacilityID: 309, Street: "Ngõ 387 Vũ Tông Phan", District: "Thanh Xuân"},
+		{FacilityID: 309, Street: "Ngõ 387 Vũ Tông Phan", District: "Thanh Xuân"},
+		{FacilityID: 309, Street: "Ngõ 12 Khác", District: "Thanh Xuân"},
+		{FacilityID: 147, District: "Cầu Giấy"},
+		{FacilityID: 0, Street: "Không có cơ sở"},
+	})
+	if got := labels[309]; got != "Ngõ 387 Vũ Tông Phan, Thanh Xuân" {
+		t.Fatalf("phải lấy phố phổ biến nhất + quận: %q", got)
+	}
+	// Cơ sở không có địa chỉ phố vẫn phải có nhãn, nếu không thì lọc không được.
+	if got := labels[147]; got != "Cầu Giấy" {
+		t.Fatalf("thiếu phố thì dùng quận: %q", got)
+	}
+	if _, ok := labels[0]; ok {
+		t.Fatal("listing không thuộc cơ sở nào thì không tạo nhãn")
+	}
+}
+
+// Nhãn phải ổn định giữa các lần đồng bộ: nhãn nhảy lung tung làm bộ lọc đang
+// chọn bị mất.
+func TestFacilityLabelStableOnTie(t *testing.T) {
+	in := []hkRawListing{
+		{FacilityID: 5, Street: "B phố"},
+		{FacilityID: 5, Street: "A phố"},
+	}
+	first := hkFacilityLabels(in)[5]
+	for i := 0; i < 5; i++ {
+		if got := hkFacilityLabels(in)[5]; got != first {
+			t.Fatalf("nhãn đổi giữa các lần gọi: %q rồi %q", first, got)
+		}
+	}
+	if first != "A phố" {
+		t.Fatalf("bằng phiếu phải lấy theo alphabet, được %q", first)
+	}
+}
+
+func TestParseStars(t *testing.T) {
+	cases := map[string][]int{
+		"5,4":     {5, 4},
+		"1":       {1},
+		"":        {},
+		"9,0,-1":  {},
+		"3, 2 ,x": {3, 2},
+	}
+	for in, want := range cases {
+		got := hkParseStars(in)
+		if len(got) != len(want) {
+			t.Errorf("%q → muốn %v được %v", in, want, got)
+			continue
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("%q → muốn %v được %v", in, want, got)
+				break
+			}
+		}
+	}
+}

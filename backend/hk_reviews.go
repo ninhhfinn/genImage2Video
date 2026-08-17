@@ -19,16 +19,20 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 type HKReview struct {
-	ID          string `json:"id"`
-	ListingID   string `json:"listing_id"`
-	ListingName string `json:"listing_name"`
-	RoomCode    string `json:"room_code"`
+	ID            string `json:"id"`
+	ListingID     string `json:"listing_id"`
+	ListingName   string `json:"listing_name"`
+	RoomID        string `json:"room_id"`
+	RoomCode      string `json:"room_code"`
+	FacilityID    int    `json:"facility_id"`
+	FacilityLabel string `json:"facility_label"`
 	Overall     int    `json:"overall"`
 	Cleanliness int    `json:"cleanliness"`
 	Comment     string `json:"comment"`
@@ -174,7 +178,8 @@ func (a *HKApp) hkCollectReviews(sinceMs int64, perListing int) ([]HKReview, err
 				}
 				rv := HKReview{
 					ID: rr.ID, ListingID: rr.ListingID,
-					ListingName: room.Name, RoomCode: room.Code,
+					ListingName: room.Name, RoomID: room.ID, RoomCode: room.Code,
+					FacilityID: room.FacilityID, FacilityLabel: room.FacilityLabel,
 					Overall: rr.Overall, Cleanliness: rr.Cleanliness,
 					Comment: strings.TrimSpace(rr.Comment), GuestName: name, CreatedAt: ts,
 				}
@@ -230,30 +235,143 @@ func hkSummarizeReviews(reviews []HKReview) HKReviewStats {
 	return st
 }
 
+// hkSyncReviews kéo đánh giá từ Dayladau về cache.
+func (a *HKApp) hkSyncReviews(days int) (int, error) {
+	if days <= 0 {
+		days = 180
+	}
+	since := time.Now().AddDate(0, 0, -days).UnixMilli()
+	list, err := a.hkCollectReviews(since, 50)
+	if err != nil {
+		return 0, err
+	}
+	return a.store.UpsertReviews(list, hkNowMs())
+}
+
+func (a *HKApp) handleReviewsSync(w http.ResponseWriter, r *http.Request) {
+	if !hkRequirePost(w, r) {
+		return
+	}
+	if _, err := a.hkRequireAdmin(r); err != nil {
+		hkFailAuth(w, err)
+		return
+	}
+	var body struct {
+		Days int `json:"days"`
+	}
+	hkDecodeBody(r, &body)
+
+	n, err := a.hkSyncReviews(body.Days)
+	if err != nil {
+		hkFail(w, http.StatusBadGateway, "Không tải được đánh giá từ Dayladau.")
+		return
+	}
+	hkWriteJSON(w, http.StatusOK, map[string]interface{}{"synced": n, "synced_at": hkNowMs()})
+}
+
+// hkParseStars đọc tham số chip sao dạng "5,4" → []int{5,4}. Bỏ giá trị ngoài 1..5.
+func hkParseStars(v string) []int {
+	out := []int{}
+	for _, part := range strings.Split(v, ",") {
+		n := hkParseInt64(part)
+		if n >= 1 && n <= 5 {
+			out = append(out, int(n))
+		}
+	}
+	return out
+}
+
 // handleReviews — cả quản lý lẫn cô dọn dẹp đều xem được.
 //
 // Cô xem được là có chủ đích: mục tiêu là để cô biết chất lượng công việc của
 // mình qua mắt khách, không phải để quản lý giữ riêng làm cơ sở khiển trách.
+//
+// Đọc từ cache trong DB chứ không gọi thẳng Dayladau: người dùng đổi bộ lọc liên
+// tục, mỗi lần chờ vài giây thì không ai dùng bộ lọc nữa. Bấm "Tải đánh giá mới"
+// mới đi lấy bản mới.
 func (a *HKApp) handleReviews(w http.ResponseWriter, r *http.Request) {
 	if _, err := a.hkAuthUser(r); err != nil {
 		hkFailAuth(w, err)
 		return
 	}
-	days := 30
-	if v := strings.TrimSpace(r.URL.Query().Get("days")); v != "" {
-		if n := hkParseInt64(v); n > 0 && n <= 365 {
-			days = int(n)
+	q := r.URL.Query()
+	loc := time.Now().Location()
+
+	f := HKReviewFilter{
+		RoomID:     strings.TrimSpace(q.Get("room_id")),
+		FacilityID: int(hkParseInt64(q.Get("facility_id"))),
+		Stars:      hkParseStars(q.Get("stars")),
+	}
+	// Khoảng ngày: `from`/`to` dạng YYYY-MM-DD. Không truyền thì lấy 30 ngày gần nhất.
+	if v := strings.TrimSpace(q.Get("from")); v != "" {
+		if t, err := time.ParseInLocation("2006-01-02", v, loc); err == nil {
+			f.From = t.UnixMilli()
 		}
 	}
-	since := time.Now().AddDate(0, 0, -days).UnixMilli()
+	if v := strings.TrimSpace(q.Get("to")); v != "" {
+		if t, err := time.ParseInLocation("2006-01-02", v, loc); err == nil {
+			// Hết ngày, không phải 00:00 — người dùng chọn "đến 14/8" là muốn gồm cả 14/8.
+			f.To = t.AddDate(0, 0, 1).Add(-time.Millisecond).UnixMilli()
+		}
+	}
+	if f.From == 0 && f.To == 0 {
+		f.From = time.Now().AddDate(0, 0, -30).UnixMilli()
+	}
 
-	reviews, err := a.hkCollectReviews(since, 30)
+	reviews, err := a.store.ListReviews(f)
 	if err != nil {
-		hkFail(w, http.StatusBadGateway, "Không tải được đánh giá từ Dayladau.")
+		hkFail(w, http.StatusInternalServerError, "Không đọc được đánh giá.")
 		return
 	}
+
+	// Danh mục cho ô lọc: chỉ những phòng/cơ sở THẬT SỰ có đánh giá, để người dùng
+	// không chọn một mục rồi nhận về danh sách rỗng.
+	all, _ := a.store.ListReviews(HKReviewFilter{})
+	type opt struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	}
+	roomSeen, facSeen := map[string]bool{}, map[int]bool{}
+	rooms, facilities := []opt{}, []opt{}
+	for _, rv := range all {
+		if rv.RoomID != "" && !roomSeen[rv.RoomID] {
+			roomSeen[rv.RoomID] = true
+			label := rv.ListingName
+			if rv.RoomCode != "" {
+				label = rv.RoomCode + " · " + label
+			}
+			rooms = append(rooms, opt{ID: rv.RoomID, Label: label})
+		}
+		if rv.FacilityID > 0 && !facSeen[rv.FacilityID] {
+			facSeen[rv.FacilityID] = true
+			label := rv.FacilityLabel
+			if label == "" {
+				label = fmt.Sprintf("Cơ sở #%d", rv.FacilityID)
+			}
+			facilities = append(facilities, opt{ID: strconv.Itoa(rv.FacilityID), Label: label})
+		}
+	}
+	sort.Slice(rooms, func(i, j int) bool { return rooms[i].Label < rooms[j].Label })
+	sort.Slice(facilities, func(i, j int) bool { return facilities[i].Label < facilities[j].Label })
+
+	// Đếm theo từng mức sao trên tập ĐÃ lọc phòng/cơ sở/ngày nhưng CHƯA lọc sao,
+	// để con số trên mỗi chip không đổi khi bấm chip khác.
+	countFilter := f
+	countFilter.Stars = nil
+	forCount, _ := a.store.ListReviews(countFilter)
+	starCounts := map[string]int{}
+	for _, rv := range forCount {
+		if rv.Overall >= 1 && rv.Overall <= 5 {
+			starCounts[strconv.Itoa(rv.Overall)]++
+		}
+	}
+
 	hkWriteJSON(w, http.StatusOK, map[string]interface{}{
-		"days":  days,
-		"stats": hkSummarizeReviews(reviews),
+		"stats":        hkSummarizeReviews(reviews),
+		"reviews":      reviews,
+		"star_counts":  starCounts,
+		"rooms":        rooms,
+		"facilities":   facilities,
+		"last_sync_at": a.store.LastReviewSync(),
 	})
 }

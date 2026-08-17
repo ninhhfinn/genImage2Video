@@ -65,7 +65,12 @@ type HKRoom struct {
 	TemplateID string `json:"template_id"`
 	DoorNote   string `json:"door_note"`
 	// Đệm dọn dẹp tối thiểu giữa hai lượt khách, lấy từ listing (`clean_time`).
-	CleanTime  int    `json:"clean_time"`
+	CleanTime int `json:"clean_time"`
+	// Cơ sở: Dayladau chỉ trả về mã số, không trả tên. Nhãn được suy từ địa chỉ
+	// chung của các phòng cùng cơ sở — "Cơ sở #309" thì người vận hành không biết
+	// là chỗ nào, còn "Ngõ 387 Vũ Tông Phan" thì biết ngay.
+	FacilityID    int    `json:"facility_id"`
+	FacilityLabel string `json:"facility_label"`
 	CheckinHr  int    `json:"checkin_hour"`
 	CheckoutHr int    `json:"checkout_hour"`
 	Active     bool   `json:"active"`

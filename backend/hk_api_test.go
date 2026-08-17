@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -725,5 +726,183 @@ func TestSuggestLeavesBlankWhenNoZoneMatch(t *testing.T) {
 	after, _ := e.app.store.SessionByID(sess.ID)
 	if after.StaffID != "" {
 		t.Fatalf("không được gán bừa cho người khu khác: %q", after.StaffID)
+	}
+}
+
+// ─── Lọc đánh giá ─────────────────────────────────────────────────────────
+
+func (e *hkTestEnv) seedReviews(t *testing.T) {
+	t.Helper()
+	base := hkNowMs()
+	day := int64(86400000)
+	list := []HKReview{
+		{ID: "r1", RoomID: e.roomID, RoomCode: "CG-TEST01", ListingName: "Căn thử nghiệm",
+			FacilityID: 309, FacilityLabel: "Ngõ 387", Overall: 5, Cleanliness: 5, Comment: "Sạch sẽ", CreatedAt: base},
+		{ID: "r2", RoomID: e.roomID, RoomCode: "CG-TEST01", ListingName: "Căn thử nghiệm",
+			FacilityID: 309, FacilityLabel: "Ngõ 387", Overall: 1, Cleanliness: 1, Comment: "Ko thay ga",
+			AboutCleaning: true, CreatedAt: base - 2*day},
+		{ID: "r3", RoomID: "phong-khac", RoomCode: "BĐ-X", ListingName: "Phòng khác",
+			FacilityID: 147, FacilityLabel: "Cầu Giấy", Overall: 4, Cleanliness: 4, CreatedAt: base - 20*day},
+	}
+	if _, err := e.app.store.UpsertReviews(list, base); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (e *hkTestEnv) reviews(t *testing.T, query string) map[string]interface{} {
+	t.Helper()
+	w := e.do("GET", "/api/hk/reviews?"+query, e.adminToken, nil)
+	if w.Code != 200 {
+		t.Fatalf("lọc hỏng (%d): %s", w.Code, w.Body.String())
+	}
+	var out map[string]interface{}
+	e.decode(w, &out)
+	return out
+}
+
+func reviewIDs(out map[string]interface{}) []string {
+	list, _ := out["reviews"].([]interface{})
+	ids := []string{}
+	for _, x := range list {
+		if m, ok := x.(map[string]interface{}); ok {
+			ids = append(ids, m["id"].(string))
+		}
+	}
+	return ids
+}
+
+func TestReviewFilterByRoom(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.seedReviews(t)
+	got := reviewIDs(e.reviews(t, "room_id="+e.roomID+"&from=2000-01-01"))
+	if len(got) != 2 {
+		t.Fatalf("muốn 2 đánh giá của phòng đó, được %v", got)
+	}
+}
+
+func TestReviewFilterByFacility(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.seedReviews(t)
+	got := reviewIDs(e.reviews(t, "facility_id=147&from=2000-01-01"))
+	if len(got) != 1 || got[0] != "r3" {
+		t.Fatalf("muốn đúng r3, được %v", got)
+	}
+}
+
+func TestReviewFilterByStars(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.seedReviews(t)
+	got := reviewIDs(e.reviews(t, "stars=1&from=2000-01-01"))
+	if len(got) != 1 || got[0] != "r2" {
+		t.Fatalf("chip 1 sao phải ra đúng r2, được %v", got)
+	}
+	got = reviewIDs(e.reviews(t, "stars=5,4&from=2000-01-01"))
+	if len(got) != 2 {
+		t.Fatalf("chip 5+4 sao phải ra 2 đánh giá, được %v", got)
+	}
+}
+
+// Khoảng ngày phải GỒM CẢ ngày cuối: người dùng chọn "đến 14/8" là muốn cả 14/8.
+func TestReviewFilterDateRangeInclusive(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.seedReviews(t)
+	today := time.Now().Format("2006-01-02")
+	got := reviewIDs(e.reviews(t, "from="+today+"&to="+today))
+	if len(got) != 1 || got[0] != "r1" {
+		t.Fatalf("đánh giá hôm nay phải nằm trong khoảng hôm nay→hôm nay, được %v", got)
+	}
+}
+
+// Số trên mỗi chip sao KHÔNG đổi khi bấm chip khác — nếu đổi thì người dùng
+// không bao giờ biết còn bao nhiêu đơn 1 sao.
+func TestStarCountsIgnoreStarFilter(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.seedReviews(t)
+	a := e.reviews(t, "from=2000-01-01")["star_counts"].(map[string]interface{})
+	b := e.reviews(t, "stars=5&from=2000-01-01")["star_counts"].(map[string]interface{})
+	if len(a) != len(b) || a["1"] != b["1"] || a["5"] != b["5"] {
+		t.Fatalf("số trên chip đổi khi lọc sao: %v vs %v", a, b)
+	}
+}
+
+// Danh mục ô lọc chỉ gồm phòng/cơ sở THẬT SỰ có đánh giá.
+func TestReviewFilterOptions(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.seedReviews(t)
+	out := e.reviews(t, "from=2000-01-01")
+	rooms, _ := out["rooms"].([]interface{})
+	facs, _ := out["facilities"].([]interface{})
+	if len(rooms) != 2 {
+		t.Fatalf("muốn 2 phòng có đánh giá, được %d", len(rooms))
+	}
+	if len(facs) != 2 {
+		t.Fatalf("muốn 2 cơ sở, được %d", len(facs))
+	}
+}
+
+// Cô dọn dẹp cũng xem và lọc được — đây là màn để cô tự cải thiện.
+func TestCleanerCanFilterReviews(t *testing.T) {
+	e := newHKTestEnv(t)
+	e.seedReviews(t)
+	w := e.do("GET", "/api/hk/reviews?stars=1&from=2000-01-01", e.lanToken, nil)
+	if w.Code != 200 {
+		t.Fatalf("cô phải xem được đánh giá: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// Nhưng chỉ quản lý mới được bấm tải đánh giá mới về (gọi ra Dayladau).
+func TestReviewSyncAdminOnly(t *testing.T) {
+	e := newHKTestEnv(t)
+	if w := e.do("POST", "/api/hk/reviews/sync", e.lanToken, map[string]int{"days": 7}); w.Code != http.StatusForbidden {
+		t.Fatalf("muốn 403 được %d", w.Code)
+	}
+}
+
+// DB tạo bởi bản CŨ phải tự thêm cột mới khi mở bằng bản mới.
+//
+// Lỗi gặp thật: thêm cột cơ sở xong, máy dev chạy ngon vì DB mới tinh, còn máy
+// đã test trước đó thì mọi truy vấn phòng hỏng với "no such column".
+func TestOpenUpgradesOldDatabase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "housekeeping.db")
+
+	// Dựng bảng theo bản cũ: thiếu facility_id, facility_label, clean_time.
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Đúng schema bản trước (có NOT NULL DEFAULT ''), chỉ thiếu ba cột mới —
+	// dựng bảng lỏng hơn thật thì test không chứng minh được gì.
+	_, err = old.Exec(`CREATE TABLE hk_room (
+		id TEXT PRIMARY KEY,
+		listing_id TEXT NOT NULL DEFAULT '', code TEXT NOT NULL DEFAULT '',
+		name TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '',
+		zone TEXT NOT NULL DEFAULT '', room_type TEXT NOT NULL DEFAULT '',
+		host_id TEXT NOT NULL DEFAULT '', host_name TEXT NOT NULL DEFAULT '',
+		template_id TEXT NOT NULL DEFAULT '', door_note TEXT NOT NULL DEFAULT '',
+		checkin_hour INTEGER NOT NULL DEFAULT 14, checkout_hour INTEGER NOT NULL DEFAULT 11,
+		active INTEGER NOT NULL DEFAULT 1, synced_at INTEGER NOT NULL DEFAULT 0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Exec(`INSERT INTO hk_room (id, name, active) VALUES ('r-cu', 'Phòng cũ', 1)`)
+	old.Close()
+
+	store, err := OpenHKStore(path)
+	if err != nil {
+		t.Fatalf("mở DB cũ bằng bản mới phải nâng cấp được: %v", err)
+	}
+	defer store.Close()
+
+	// Đọc được nghĩa là cột mới đã thêm, và dữ liệu cũ còn nguyên.
+	room, err := store.RoomByID("r-cu")
+	if err != nil {
+		t.Fatalf("đọc phòng cũ sau nâng cấp: %v", err)
+	}
+	if room.Name != "Phòng cũ" {
+		t.Fatalf("dữ liệu cũ phải giữ nguyên: %+v", room)
+	}
+	if room.CleanTime != 1 {
+		t.Fatalf("cột mới phải có giá trị mặc định, được %d", room.CleanTime)
 	}
 }
