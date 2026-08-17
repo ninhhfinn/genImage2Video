@@ -121,6 +121,7 @@ func (s *HKStore) migrate() error {
 			next_checkin_at INTEGER NOT NULL DEFAULT 0,
 			deadline_at INTEGER NOT NULL DEFAULT 0,
 			guest_note TEXT NOT NULL DEFAULT '',
+			cleaner_note TEXT NOT NULL DEFAULT '',
 			booking_uid TEXT NOT NULL DEFAULT '',
 			items_state TEXT NOT NULL DEFAULT '{}',
 			template_snapshot TEXT NOT NULL DEFAULT '',
@@ -183,7 +184,8 @@ func (s *HKStore) addMissingColumns() error {
 			"facility_label": "TEXT NOT NULL DEFAULT ''",
 		},
 		"hk_session": {
-			"booking_uid": "TEXT NOT NULL DEFAULT ''",
+			"booking_uid":  "TEXT NOT NULL DEFAULT ''",
+			"cleaner_note": "TEXT NOT NULL DEFAULT ''",
 		},
 	}
 	for table, cols := range wanted {
@@ -477,14 +479,14 @@ func (s *HKStore) TemplateByID(id string) (HKTemplate, error) {
 // ─── Ca dọn ───────────────────────────────────────────────────────────────
 
 const sessionCols = `id, day, room_id, listing_id, template_id, staff_id, status,
-	checkout_at, next_checkin_at, deadline_at, guest_note, booking_uid,
+	checkout_at, next_checkin_at, deadline_at, guest_note, cleaner_note, booking_uid,
 	items_state, template_snapshot, started_at, submitted_at, reviewed_at, reviewed_by, review_note`
 
 func scanSession(row interface{ Scan(...interface{}) error }) (HKSession, error) {
 	var s HKSession
 	var itemsState, snapshot string
 	err := row.Scan(&s.ID, &s.Day, &s.RoomID, &s.ListingID, &s.TemplateID, &s.StaffID, &s.Status,
-		&s.CheckoutAt, &s.NextCheckinAt, &s.DeadlineAt, &s.GuestNote, &s.BookingUID,
+		&s.CheckoutAt, &s.NextCheckinAt, &s.DeadlineAt, &s.GuestNote, &s.CleanerNote, &s.BookingUID,
 		&itemsState, &snapshot, &s.StartedAt, &s.SubmittedAt, &s.ReviewedAt, &s.ReviewedBy, &s.ReviewNote)
 	if err != nil {
 		return s, err
@@ -510,9 +512,9 @@ func (s *HKStore) InsertSessionIfAbsent(sess HKSession) (bool, error) {
 	defer s.writeMu.Unlock()
 	res, err := s.db.Exec(`
 		INSERT OR IGNORE INTO hk_session (`+sessionCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		sess.ID, sess.Day, sess.RoomID, sess.ListingID, sess.TemplateID, sess.StaffID, sess.Status,
-		sess.CheckoutAt, sess.NextCheckinAt, sess.DeadlineAt, sess.GuestNote, sess.BookingUID,
+		sess.CheckoutAt, sess.NextCheckinAt, sess.DeadlineAt, sess.GuestNote, sess.CleanerNote, sess.BookingUID,
 		jsonMarshalString(sess.ItemsState), snapshotJSON(sess.TemplateSnapshot),
 		sess.StartedAt, sess.SubmittedAt, sess.ReviewedAt, sess.ReviewedBy, sess.ReviewNote)
 	if err != nil {
@@ -563,10 +565,10 @@ func (s *HKStore) UpdateSession(sess HKSession) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	_, err := s.db.Exec(`
-		UPDATE hk_session SET staff_id=?, status=?, guest_note=?,
+		UPDATE hk_session SET staff_id=?, status=?, guest_note=?, cleaner_note=?,
 			items_state=?, started_at=?, submitted_at=?, reviewed_at=?, reviewed_by=?, review_note=?
 		WHERE id=?`,
-		sess.StaffID, sess.Status, sess.GuestNote,
+		sess.StaffID, sess.Status, sess.GuestNote, sess.CleanerNote,
 		jsonMarshalString(sess.ItemsState), sess.StartedAt, sess.SubmittedAt,
 		sess.ReviewedAt, sess.ReviewedBy, sess.ReviewNote, sess.ID)
 	return err

@@ -125,6 +125,10 @@ type HKSession struct {
 	DeadlineAt    int64 `json:"deadline_at"`
 
 	GuestNote string `json:"guest_note"`
+	// Cô báo hỏng hóc / thiếu đồ. Nằm NGOÀI checklist: nó không phải một việc phải
+	// làm, và bắt cô đi qua nó mỗi ca chỉ để bấm "không có gì" là thêm một chạm vô
+	// ích cho phần lớn số ca.
+	CleanerNote string `json:"cleaner_note"`
 
 	// Mã lượt đặt lấy từ iCal — khoá chống trùng khi đồng bộ chạy lại.
 	// Phải là mã lượt chứ không phải (phòng, ngày): 59/60 phòng cho thuê theo

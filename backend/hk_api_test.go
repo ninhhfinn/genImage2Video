@@ -906,3 +906,52 @@ func TestOpenUpgradesOldDatabase(t *testing.T) {
 		t.Fatalf("cột mới phải có giá trị mặc định, được %d", room.CleanTime)
 	}
 }
+
+// Mọi mục checklist đều phải chụp ảnh — không có mục tick suông.
+//
+// Checklist dựng riêng cho từng loại phòng nên không có chuyện "mục này căn đó
+// không áp dụng"; và việc tưởng như không chụp được thì vẫn chụp được ("đã cất
+// chìa khoá" = chụp hộp khoá đúng số phòng, mở ra thấy chìa có tag).
+func TestTemplateForcesPhotoOnEveryItem(t *testing.T) {
+	e := newHKTestEnv(t)
+	w := e.do("POST", "/api/hk/templates", e.adminToken, HKTemplate{
+		ID: "hkt_studio", Name: "Thử", Groups: []HKGroup{
+			{ID: "g", Title: "Nhóm", Items: []HKItem{
+				{ID: "i1", Title: "Việc tick suông", RequirePhoto: false},
+				{ID: "i2", Title: "Việc có ảnh", RequirePhoto: true, MinPhotos: 2},
+			}},
+		},
+	})
+	if w.Code != 200 {
+		t.Fatalf("lưu hỏng: %s", w.Body.String())
+	}
+	saved, err := e.app.store.TemplateByID("hkt_studio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range hkFlattenItems(&saved) {
+		if !it.RequirePhoto {
+			t.Fatalf("mục %q phải bị ép thành cần ảnh", it.Title)
+		}
+		if it.MinPhotos < 1 {
+			t.Fatalf("mục %q phải có tối thiểu 1 ảnh, được %d", it.Title, it.MinPhotos)
+		}
+	}
+	// Mục vốn đòi 2 ảnh thì giữ nguyên 2, không bị ép về 1.
+	for _, it := range hkFlattenItems(&saved) {
+		if it.ID == "i2" && it.MinPhotos != 2 {
+			t.Fatalf("min_photos=2 phải giữ nguyên, được %d", it.MinPhotos)
+		}
+	}
+}
+
+// Mẫu mặc định không được có mục nào tick suông.
+func TestSeedTemplatesAllRequirePhoto(t *testing.T) {
+	for _, tpl := range hkDefaultTemplates(0) {
+		for _, it := range hkFlattenItems(&tpl) {
+			if !it.RequirePhoto {
+				t.Errorf("mẫu %q: mục %q không cần ảnh", tpl.Name, it.Title)
+			}
+		}
+	}
+}

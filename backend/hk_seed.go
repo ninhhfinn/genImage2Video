@@ -21,7 +21,8 @@ func hkGroupBedroom(suffix, title string) HKGroup {
 			hkItem(id("i_bed_linen"), "Thay ga, vỏ gối, vỏ chăn mới", true, 1, "Chụp giường đã trải xong, thấy cả 4 góc"),
 			hkItem(id("i_bed_vacuum"), "Hút bụi / lau sàn phòng ngủ", true, 1, ""),
 			hkItem(id("i_bed_under"), "Kiểm tra gầm giường, tủ đầu giường", true, 1, "Khách hay bỏ quên đồ ở đây"),
-			hkItem(id("i_bed_aircon"), "Lau mặt nạ điều hoà, bật thử", false, 0, ""),
+			hkItem(id("i_bed_aircon"), "Lau mặt nạ điều hoà, bật thử", true, 1,
+				"Chụp điều hoà đang chạy — thấy được đèn báo hoặc màn hình remote"),
 		},
 	}
 }
@@ -81,9 +82,10 @@ func hkGroupFinal() HKGroup {
 		Items: []HKItem{
 			hkItem("i_fin_overview", "Ảnh tổng thể căn sau khi xong", true, 2,
 				"Chụp 2 góc đối diện nhau để thấy toàn bộ căn"),
-			hkItem("i_fin_lock", "Tắt điều hoà, đèn, khoá cửa", true, 1, ""),
-			hkItem("i_fin_report", "Báo hỏng hóc / thiếu đồ cho chủ nhà (nếu có)", false, 0,
-				"Không có gì hỏng thì tick qua"),
+			hkItem("i_fin_off", "Tắt điều hoà, tắt đèn", true, 1,
+				"Chụp bảng điện / điều hoà đã tắt"),
+			hkItem("i_fin_key", "Cất chìa khoá vào hộp", true, 1,
+				"Chụp hộp khoá đúng số phòng, mở ra thấy chìa có tag phòng đó"),
 		},
 	}
 }
@@ -171,4 +173,84 @@ func hkTemplateSummary(t *HKTemplate) string {
 		titles = append(titles, g.Title)
 	}
 	return strings.Join(titles, " · ")
+}
+
+// ─── Nâng cấp mẫu cũ ──────────────────────────────────────────────────────
+
+// hkLegacyNonPhotoItems — mục của bản cũ không còn thuộc checklist.
+//
+// "Báo hỏng hóc / thiếu đồ" không phải một việc phải làm mà là một việc CÓ THỂ
+// phát sinh, nên nó chuyển ra ngoài luồng chụp (ô ghi chú ở màn xong). Để lại
+// trong checklist thì cô phải chụp ảnh cho một việc không có gì để chụp.
+var hkLegacyNonPhotoItems = map[string]bool{
+	"i_fin_report": true,
+}
+
+// hkNormalizeTemplate ép mọi mục phải chụp ảnh và bỏ mục cũ không còn hợp lệ.
+//
+// Áp cả lúc lưu lẫn lúc ĐỌC (kể cả bản chụp mẫu trong ca đang dở): ca tạo trước
+// khi đổi luật vẫn giữ mẫu cũ, và nếu không chuẩn hoá lúc đọc thì cô đang dọn dở
+// sẽ kẹt ở một mục không thể chụp.
+func hkNormalizeTemplate(t *HKTemplate) *HKTemplate {
+	if t == nil {
+		return nil
+	}
+	out := *t
+	out.Groups = make([]HKGroup, 0, len(t.Groups))
+	for _, g := range t.Groups {
+		ng := g
+		ng.Items = make([]HKItem, 0, len(g.Items))
+		for _, it := range g.Items {
+			if hkLegacyNonPhotoItems[hkBaseItemID(it.ID)] {
+				continue
+			}
+			it.RequirePhoto = true
+			if it.MinPhotos <= 0 {
+				it.MinPhotos = 1
+			}
+			ng.Items = append(ng.Items, it)
+		}
+		// Nhóm rỗng sau khi lọc thì bỏ luôn, đỡ hiện một tiêu đề trống.
+		if len(ng.Items) > 0 {
+			out.Groups = append(out.Groups, ng)
+		}
+	}
+	return &out
+}
+
+// hkBaseItemID bỏ hậu tố phòng ngủ thứ hai ("_2") để nhận ra mục gốc.
+func hkBaseItemID(id string) string {
+	return strings.TrimSuffix(id, "_2")
+}
+
+// hkUpgradeTemplates chuẩn hoá các mẫu đã lưu trong DB.
+func (a *HKApp) hkUpgradeTemplates() error {
+	list, err := a.store.ListTemplates()
+	if err != nil {
+		return err
+	}
+	for _, t := range list {
+		fixed := hkNormalizeTemplate(&t)
+		if hkTemplateEqual(&t, fixed) {
+			continue
+		}
+		fixed.UpdatedAt = hkNowMs()
+		if err := a.store.UpsertTemplate(*fixed); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func hkTemplateEqual(a, b *HKTemplate) bool {
+	ia, ib := hkFlattenItems(a), hkFlattenItems(b)
+	if len(ia) != len(ib) {
+		return false
+	}
+	for i := range ia {
+		if ia[i].ID != ib[i].ID || ia[i].RequirePhoto != ib[i].RequirePhoto || ia[i].MinPhotos != ib[i].MinPhotos {
+			return false
+		}
+	}
+	return true
 }

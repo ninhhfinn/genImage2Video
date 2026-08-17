@@ -40,6 +40,10 @@ func NewHKApp(dataDir string) (*HKApp, error) {
 	if err := app.hkSeedTemplates(); err != nil {
 		return nil, err
 	}
+	// Mẫu lưu từ bản cũ còn mục tick suông — chuẩn hoá lại lúc khởi động.
+	if err := app.hkUpgradeTemplates(); err != nil {
+		return nil, err
+	}
 	store.PurgeExpiredTokens(hkNowMs())
 	return app, nil
 }
@@ -435,14 +439,22 @@ func (a *HKApp) handleTemplates(w http.ResponseWriter, r *http.Request) {
 	}
 	// Mục không có tên là một ô trống trên điện thoại của cô, không biết phải làm
 	// gì — chặn ngay lúc lưu thay vì để cô phát hiện lúc đứng trong phòng.
-	for _, g := range t.Groups {
-		for _, it := range g.Items {
+	//
+	// Và MỌI mục đều phải chụp ảnh. Checklist được dựng riêng cho từng loại phòng
+	// nên không có chuyện "mục này căn đó không áp dụng"; còn việc tưởng như không
+	// chụp được thì vẫn chụp được — "đã cất chìa khoá" là chụp hộp khoá đúng số
+	// phòng, mở ra thấy chìa có tag. Mục tick suông không có bằng chứng chỉ dạy
+	// người ta tick bừa.
+	for gi := range t.Groups {
+		for ii := range t.Groups[gi].Items {
+			it := &t.Groups[gi].Items[ii]
 			if strings.TrimSpace(it.Title) == "" {
 				hkFail(w, http.StatusBadRequest, "Còn mục chưa có tên việc. Điền đủ rồi lưu lại nhé.")
 				return
 			}
 		}
 	}
+	t = *hkNormalizeTemplate(&t)
 	if t.ID == "" {
 		t.ID = hkRandomID("hkt")
 	}
@@ -649,7 +661,32 @@ func (a *HKApp) hkTemplateOf(sess *HKSession) *HKTemplate {
 			live = &t
 		}
 	}
-	return hkTemplateFor(sess, live)
+	return hkNormalizeTemplate(hkTemplateFor(sess, live))
+}
+
+// handleSessionNote — cô báo hỏng hóc / thiếu đồ.
+func (a *HKApp) handleSessionNote(w http.ResponseWriter, r *http.Request) {
+	if !hkRequirePost(w, r) {
+		return
+	}
+	var body struct {
+		ID   string `json:"id"`
+		Note string `json:"note"`
+	}
+	if err := hkDecodeBody(r, &body); err != nil {
+		hkFail(w, http.StatusBadRequest, "Dữ liệu gửi lên không đọc được.")
+		return
+	}
+	_, sess, ok := a.hkLoadSessionFor(w, r, body.ID)
+	if !ok {
+		return
+	}
+	sess.CleanerNote = strings.TrimSpace(body.Note)
+	if err := a.store.UpdateSession(sess); err != nil {
+		hkFail(w, http.StatusInternalServerError, "Không lưu được ghi chú.")
+		return
+	}
+	a.writeSessionView(w, sess)
 }
 
 func (a *HKApp) handleSessionSubmit(w http.ResponseWriter, r *http.Request) {
@@ -1011,6 +1048,7 @@ func (a *HKApp) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/hk/sessions/start", a.handleSessionStart)
 	mux.HandleFunc("/api/hk/sessions/item", a.handleSessionItem)
 	mux.HandleFunc("/api/hk/sessions/submit", a.handleSessionSubmit)
+	mux.HandleFunc("/api/hk/sessions/note", a.handleSessionNote)
 	mux.HandleFunc("/api/hk/sessions/assign", a.handleSessionAssign)
 	mux.HandleFunc("/api/hk/sessions/review", a.handleSessionReview)
 

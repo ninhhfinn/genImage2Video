@@ -328,3 +328,53 @@ func TestParseStars(t *testing.T) {
 		}
 	}
 }
+
+// ─── Chuẩn hoá mẫu checklist ──────────────────────────────────────────────
+
+// Mọi mục phải chụp ảnh, và mục "báo hỏng hóc" của bản cũ bị gỡ khỏi checklist
+// (nó chuyển ra ô ghi chú ngoài luồng chụp).
+func TestNormalizeTemplate(t *testing.T) {
+	in := &HKTemplate{Groups: []HKGroup{
+		{ID: "g1", Title: "Nhóm 1", Items: []HKItem{
+			{ID: "a", Title: "Tick suông", RequirePhoto: false},
+			{ID: "b", Title: "Có ảnh", RequirePhoto: true, MinPhotos: 2},
+		}},
+		{ID: "g2", Title: "Kiểm tra cuối", Items: []HKItem{
+			{ID: "i_fin_report", Title: "Báo hỏng hóc", RequirePhoto: false},
+		}},
+	}}
+	out := hkNormalizeTemplate(in)
+
+	items := hkFlattenItems(out)
+	if len(items) != 2 {
+		t.Fatalf("mục báo hỏng hóc phải bị gỡ, còn %d mục: %+v", len(items), items)
+	}
+	for _, it := range items {
+		if !it.RequirePhoto || it.MinPhotos < 1 {
+			t.Fatalf("mục %q phải cần ảnh và tối thiểu 1: %+v", it.Title, it)
+		}
+	}
+	if items[1].MinPhotos != 2 {
+		t.Fatalf("min_photos=2 phải giữ nguyên, được %d", items[1].MinPhotos)
+	}
+	// Nhóm rỗng sau khi lọc thì bỏ luôn, đỡ hiện tiêu đề trống.
+	if len(out.Groups) != 1 {
+		t.Fatalf("nhóm rỗng phải bị bỏ, còn %d nhóm", len(out.Groups))
+	}
+}
+
+// Phòng ngủ thứ hai dùng hậu tố "_2" — mục báo hỏng hóc bản sao cũng phải bị gỡ.
+func TestNormalizeTemplateHandlesSuffixedIDs(t *testing.T) {
+	out := hkNormalizeTemplate(&HKTemplate{Groups: []HKGroup{
+		{ID: "g", Items: []HKItem{{ID: "i_fin_report_2", Title: "Báo hỏng hóc (PN2)"}}},
+	}})
+	if len(hkFlattenItems(out)) != 0 {
+		t.Fatal("bản sao có hậu tố _2 cũng phải bị gỡ")
+	}
+}
+
+func TestNormalizeTemplateNilSafe(t *testing.T) {
+	if hkNormalizeTemplate(nil) != nil {
+		t.Fatal("nil phải trả nil")
+	}
+}

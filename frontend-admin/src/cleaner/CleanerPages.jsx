@@ -12,6 +12,7 @@ import { useAuth } from '../auth.jsx'
 import { useRouter } from '../router.jsx'
 import PhotoUploader from '../components/PhotoUploader.jsx'
 import { Alert, Empty, Progress, Spinner } from '../components/ui.jsx'
+import CaptureFlow from './CaptureFlow.jsx'
 import { ReviewFilters, defaultReviewFilter, reviewQuery } from '../components/ReviewFilters.jsx'
 import {
 	ROOM_TYPE_LABEL,
@@ -163,9 +164,9 @@ export function CleanerTodayPage() {
 // ─── Checklist một phòng ──────────────────────────────────────────────────
 
 export function CleanerSessionPage({ sessionId }) {
+	const { navigate } = useRouter()
 	const [session, setSession] = useState(null)
 	const [err, setErr] = useState('')
-	const [openGroup, setOpenGroup] = useState('')
 
 	useEffect(() => {
 		api
@@ -174,31 +175,7 @@ export function CleanerSessionPage({ sessionId }) {
 			.catch((e) => setErr(e.message))
 	}, [sessionId])
 
-	const template = session?.template_snapshot
-	const locked = session?.status === 'approved'
-
-	// Lưu NGAY từng ảnh, không có nút "Lưu": cô đi sang phòng khác, màn hình khoá,
-	// trình duyệt bị thu hồi — state chờ bấm Lưu là mất trắng.
-	async function saveItem(itemId, patch) {
-		try {
-			const d = await api.saveItem(sessionId, itemId, patch)
-			setSession(d.session)
-			setErr('')
-		} catch (e) {
-			setErr(e.message)
-		}
-	}
-
-	async function start() {
-		try {
-			const d = await api.startSession(sessionId)
-			setSession(d.session)
-		} catch (e) {
-			setErr(e.message)
-		}
-	}
-
-	if (err && !session) {
+	if (err) {
 		return (
 			<CleanerShell active="today" title="Không mở được" back="/cleaning">
 				<Alert>{err}</Alert>
@@ -213,133 +190,34 @@ export function CleanerSessionPage({ sessionId }) {
 		)
 	}
 
-	const p = session.progress || {}
-	const submitted = session.status === 'submitted' || session.status === 'approved'
-
-	return (
-		<CleanerShell active="today" title={session.room?.name || 'Ca dọn'} back="/cleaning">
-			<div className="mob-head">
-				<div>📍 {session.room?.address}</div>
-				<div>
-					Khách trả phòng {hour(session.checkout_at)} · xong trước <strong>{hour(session.deadline_at)}</strong>
+	// Ca đã chốt thì không chụp nữa — hiện lại ảnh cho cô xem.
+	if (session.status === 'approved' || session.status === 'rejected') {
+		return (
+			<CleanerShell active="today" title={session.room?.name || 'Ca dọn'} back="/cleaning">
+				<div className={`banner banner--${session.status === 'approved' ? 'ok' : 'danger'}`}>
+					<strong>
+						{session.status === 'approved' ? 'Quản lý đã duyệt ca này.' : 'Quản lý trả lại ca này.'}
+					</strong>
+					{session.review_note && <span>{session.review_note}</span>}
 				</div>
-				{session.room?.door_note && <div className="mob-door">🔑 {session.room.door_note}</div>}
-				{session.guest_note && <div className="mob-note">Lưu ý: {session.guest_note}</div>}
-			</div>
-
-			{!session.started_at && !submitted && (
-				<button className="btn btn--primary btn--big" onClick={start}>
-					Bắt đầu dọn
-				</button>
-			)}
-
-			{submitted && (
-				<div className="banner banner--ok">
-					<strong>Đã đủ ảnh — ca này ghi nhận xong.</strong>
-					<span>
-						{session.minutes ? `Bạn dọn hết ${minutes(session.minutes)}. ` : ''}
-						{session.status === 'approved' ? 'Quản lý đã duyệt.' : 'Đang chờ quản lý xem ảnh.'}
-					</span>
-				</div>
-			)}
-
-			{session.status === 'rejected' && (
-				<div className="banner banner--danger">
-					<strong>Quản lý chưa duyệt ca này.</strong>
-					<span>{session.review_note || 'Vui lòng liên hệ quản lý.'}</span>
-				</div>
-			)}
-
-			<Alert>{err}</Alert>
-
-			<div className="groups">
-				{(template?.groups || []).map((g) => {
-					const items = g.items || []
-					const doneCount = items.filter((it) => isDone(session, it)).length
-					const allDone = items.length > 0 && doneCount === items.length
-					const open = openGroup === g.id
-					return (
-						<section key={g.id} className={`group${allDone ? ' group--done' : ''}`}>
-							<button className="group-head" onClick={() => setOpenGroup(open ? '' : g.id)} aria-expanded={open}>
-								<span className="group-ico">{allDone ? '✅' : '⬜'}</span>
-								<span className="group-title">{g.title}</span>
-								<span className="group-count">
-									{doneCount}/{items.length}
-								</span>
-								<span>{open ? '⌄' : '›'}</span>
-							</button>
-
-							{open && (
-								<div className="group-body">
-									{items.map((it) => {
-										const photos = session.items_state?.[it.id]?.photos || []
-										const checked = !!session.items_state?.[it.id]?.checked
-										const done = isDone(session, it)
-										return (
-											<div key={it.id} className={`item${done ? ' item--done' : ''}`}>
-												<div className="item-head">
-													<span className="item-ico">{done ? '✅' : '⬜'}</span>
-													<div>
-														<div className="item-title">{it.title}</div>
-														{it.hint && <div className="item-hint">{it.hint}</div>}
-														{it.require_photo && (
-															<div className="item-req">
-																Cần {it.min_photos || 1} ảnh{photos.length ? ` · đã có ${photos.length}` : ''}
-															</div>
-														)}
-													</div>
-												</div>
-
-												{it.require_photo ? (
-													<PhotoUploader
-														photos={photos}
-														disabled={locked}
-														onChange={(next) => saveItem(it.id, { photos: next })}
-													/>
-												) : (
-													<label className="tick">
-														<input
-															type="checkbox"
-															checked={checked}
-															disabled={locked}
-															onChange={(e) => saveItem(it.id, { checked: e.target.checked })}
-														/>
-														<span>Đã làm xong</span>
-													</label>
-												)}
-											</div>
-										)
-									})}
-								</div>
-							)}
-						</section>
-					)
-				})}
-			</div>
-
-			<div className="mob-bottom">
-				{p.complete ? (
-					<div className="mob-bottom-ok">✅ Xong hết rồi</div>
-				) : (
-					<div className="mob-bottom-todo">
-						<Progress percent={p.percent} />
-						{/* Nói TÊN mục còn thiếu, không phải "chưa đủ điều kiện": cô cần biết
-						    phải quay lại phòng nào, không cần biết hệ thống nghĩ gì. */}
-						<span>
-							Còn <strong>{(p.missing || []).length}</strong> việc cần ảnh
-							{(p.missing || []).length ? `: ${p.missing[0]}` : ''}
-						</span>
+				<div className="mob-head">
+					<div>📍 {session.room?.address}</div>
+					<div>
+						{session.progress?.photo_count} ảnh · {minutes(session.minutes)}
 					</div>
-				)}
-			</div>
-		</CleanerShell>
-	)
-}
+				</div>
+			</CleanerShell>
+		)
+	}
 
-function isDone(session, item) {
-	const st = session.items_state?.[item.id] || {}
-	if (!item.require_photo) return !!st.checked
-	return (st.photos || []).length >= (item.min_photos || 1)
+	// Toàn màn hình, không header/tabbar: mỗi pixel dành cho việc đang làm.
+	return (
+		<CaptureFlow
+			session={session}
+			onSessionChange={setSession}
+			onExit={() => navigate('/cleaning')}
+		/>
+	)
 }
 
 // ─── Kết quả của tôi ──────────────────────────────────────────────────────

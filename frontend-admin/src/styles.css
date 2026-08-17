@@ -1674,3 +1674,314 @@ tbody tr:last-child td {
 	justify-content: space-between;
 	gap: 8px;
 }
+
+/* ─── Màn chụp checklist (một chạm) ───────────────────────────────────── */
+/*
+   Toàn màn hình, không header/tabbar: mỗi pixel dành cho việc đang làm. Nút chụp
+   chiếm gần hết phần dưới màn — cô cầm điện thoại một tay, tay kia còn cầm giẻ,
+   nên vùng chạm phải to tới mức không bấm trượt được.
+*/
+
+.cap {
+	position: fixed;
+	inset: 0;
+	z-index: 1200;
+	background: var(--bg);
+	display: flex;
+	flex-direction: column;
+	padding: calc(8px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px));
+	gap: 10px;
+	overflow-y: auto;
+}
+
+.cap-top {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.cap-x {
+	width: 44px;
+	height: 44px;
+	flex: 0 0 auto;
+	border: 0;
+	background: transparent;
+	font-size: 20px;
+	color: var(--muted);
+	border-radius: 12px;
+	cursor: pointer;
+}
+
+.cap-x--ghost {
+	visibility: hidden;
+}
+
+.cap-progress {
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	align-items: center;
+}
+
+.cap-bar {
+	width: 100%;
+	height: 8px;
+	border-radius: 999px;
+	background: rgba(91, 100, 114, 0.2);
+	overflow: hidden;
+}
+
+.cap-bar-fill {
+	height: 100%;
+	background: var(--primary);
+	transition: width 0.2s ease;
+}
+
+.cap-progress span {
+	font-size: 12.5px;
+	color: var(--muted);
+	font-variant-numeric: tabular-nums;
+}
+
+/* Ảnh vừa chụp — bấm vào là chụp lại ngay, không phải nhớ để cuối buổi. */
+.cap-last {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: var(--card);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.cap-last img {
+	width: 46px;
+	height: 46px;
+	object-fit: cover;
+	border-radius: 9px;
+	flex: 0 0 auto;
+}
+
+.cap-last span {
+	font-size: 13px;
+	color: var(--muted);
+	display: flex;
+	flex-direction: column;
+	line-height: 1.35;
+	min-width: 0;
+}
+
+.cap-last em {
+	font-style: normal;
+	font-weight: 700;
+	color: var(--primary);
+	font-size: 13.5px;
+}
+
+.cap-main {
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	text-align: center;
+	gap: 8px;
+	padding: 12px 4px;
+}
+
+.cap-group {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--muted);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+/* Tên việc là thứ duy nhất cô cần đọc — cho nó to hẳn. */
+.cap-title {
+	font-size: 27px;
+	font-weight: 800;
+	line-height: 1.25;
+	margin: 0;
+}
+
+.cap-hint {
+	font-size: 16px;
+	color: var(--muted);
+	margin: 0;
+	max-width: 30ch;
+	line-height: 1.45;
+}
+
+.cap-count {
+	margin: 4px 0 0;
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--primary);
+}
+
+.cap-big {
+	flex: 0 0 auto;
+	width: 100%;
+	min-height: 88px;
+	border: 0;
+	border-radius: 18px;
+	font: inherit;
+	font-size: 21px;
+	font-weight: 800;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 12px;
+}
+
+.cap-big--shoot {
+	background: var(--primary);
+	color: #fff;
+	box-shadow: 0 6px 18px rgba(29, 78, 216, 0.3);
+}
+
+.cap-big--shoot:active {
+	transform: translateY(1px);
+}
+
+.cap-big--primary {
+	background: var(--primary);
+	color: #fff;
+	min-height: 64px;
+	font-size: 18px;
+}
+
+.cap-cam {
+	font-size: 30px;
+}
+
+/* ─── Màn xong ────────────────────────────────────────────────────────── */
+
+.cap--done {
+	align-items: center;
+	justify-content: center;
+	text-align: center;
+}
+
+.cap-done-mark {
+	font-size: 66px;
+}
+
+.cap--done h1 {
+	font-size: 30px;
+	margin: 0;
+}
+
+.cap-done-sub {
+	color: var(--muted);
+	margin: 0 0 8px;
+	font-size: 15px;
+}
+
+.cap-note {
+	background: var(--warn-bg);
+	color: var(--warn);
+	border-radius: 11px;
+	padding: 10px 14px;
+	font-size: 14px;
+	width: 100%;
+}
+
+.cap-note--bad {
+	background: var(--danger-bg);
+	color: var(--danger);
+}
+
+.cap-link {
+	background: none;
+	border: 0;
+	color: var(--primary);
+	font: inherit;
+	font-size: 15px;
+	font-weight: 600;
+	min-height: 48px;
+	cursor: pointer;
+}
+
+.cap-report {
+	width: 100%;
+	text-align: left;
+	margin-top: 4px;
+}
+
+.cap-report label {
+	display: block;
+	font-size: 13px;
+	color: var(--muted);
+	margin-bottom: 6px;
+}
+
+.cap-report input {
+	width: 100%;
+	min-height: 50px;
+	font-size: 16px;
+	border-radius: 12px;
+}
+
+/* ─── Màn xem lại ─────────────────────────────────────────────────────── */
+
+.cap-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+	gap: 10px;
+	padding-bottom: 12px;
+}
+
+.cap-cell {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: var(--card);
+	padding: 6px;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.cap-cell img {
+	width: 100%;
+	aspect-ratio: 1;
+	object-fit: cover;
+	border-radius: 8px;
+}
+
+.cap-cell-empty {
+	width: 100%;
+	aspect-ratio: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--danger-bg);
+	color: var(--danger);
+	border-radius: 8px;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.cap-cell-label {
+	font-size: 11.5px;
+	line-height: 1.3;
+	color: var(--text);
+}
+
+.cap-cell-retake {
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--primary);
+}

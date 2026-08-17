@@ -110,6 +110,7 @@ export const api = {
 	startSession: (id) => post('/api/hk/sessions/start', { id }),
 	saveItem: (id, itemId, patch) => post('/api/hk/sessions/item', { id, item_id: itemId, ...patch }),
 	submitSession: (id) => post('/api/hk/sessions/submit', { id }),
+	reportIssue: (id, note) => post('/api/hk/sessions/note', { id, note }),
 	assignSession: (id, staffId) => post('/api/hk/sessions/assign', { id, staff_id: staffId }),
 	reviewSession: (payload) => post('/api/hk/sessions/review', payload),
 
