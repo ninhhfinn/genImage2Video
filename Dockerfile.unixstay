@@ -1,0 +1,55 @@
+# App Dọn dẹp (unixstay) — ảnh Docker để chạy trên máy chủ, không cần máy bàn ở nhà.
+#
+# VÌ SAO CHỈ ĐÓNG GÓI APP DỌN DẸP, KHÔNG ĐÓNG GÓI CÔNG CỤ VIDEO:
+# công cụ video cần ffmpeg + Google Chrome + ImageMagick và ăn CPU nặng khi
+# render. Nhét cả vào đây thì ảnh phồng lên hơn 1GB và máy chủ nhỏ không kham
+# nổi. Module dọn dẹp thì KHÔNG cần thư viện ngoài nào — binary Go tĩnh 13MB —
+# nên nó chạy được trên máy chủ rẻ nhất.
+#
+# Kết quả: video.quanlyhomestay.com vẫn ở máy bàn (nơi có ffmpeg và CPU),
+# còn app dọn dẹp chạy trên mây, không phụ thuộc máy bàn bật hay tắt.
+
+# ─── Tầng 1: build giao diện ──────────────────────────────────────────────
+FROM node:22-alpine AS ui
+WORKDIR /src
+
+COPY frontend-admin/package*.json frontend-admin/
+# npm hay bỏ sót gói native theo nền tảng (lỗi rolldown-binding); cài rời cho chắc.
+RUN cd frontend-admin && npm ci --no-audit --no-fund \
+ && npm install --no-save "@rolldown/binding-linux-x64-gnu@$(node -p "require('./node_modules/rolldown/package.json').version")" || true
+
+COPY frontend-admin/ frontend-admin/
+RUN cd frontend-admin && npm run build
+
+# ─── Tầng 2: build backend ────────────────────────────────────────────────
+FROM golang:1.25-alpine AS build
+WORKDIR /src
+
+COPY backend/go.mod backend/go.sum backend/
+RUN cd backend && go mod download
+
+COPY backend/ backend/
+# CGO_ENABLED=0: driver SQLite là bản thuần Go (modernc.org/sqlite) nên không cần
+# trình biên dịch C, và binary tĩnh chạy được trên ảnh trống trơn.
+RUN cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/unixstay .
+
+# ─── Tầng 3: ảnh chạy ─────────────────────────────────────────────────────
+FROM alpine:3.20
+# ca-certificates: backend gọi HTTPS sang api.dayladau.com. Thiếu nó thì mọi lượt
+# đồng bộ phòng/lịch/đánh giá đều lỗi chứng chỉ.
+# tzdata: giờ trả phòng và hạn dọn tính theo giờ Việt Nam; thiếu thì máy chủ chạy
+# UTC và ca hiện lệch 7 tiếng.
+RUN apk add --no-cache ca-certificates tzdata
+ENV TZ=Asia/Ho_Chi_Minh
+
+WORKDIR /app
+COPY --from=build /out/unixstay /app/unixstay
+COPY --from=ui /src/backend/dist-admin /app/dist-admin
+
+# Dữ liệu (SQLite + ảnh checklist) nằm ngoài ảnh Docker để không mất khi deploy.
+ENV HK_DATA_DIR=/data
+VOLUME ["/data"]
+
+EXPOSE 8080
+# Không có thư mục dist/ nên công cụ video không được phục vụ ở đây — đúng ý đồ.
+CMD ["/app/unixstay", "--web", "--port", "8080"]

@@ -1,0 +1,56 @@
+# Kiểm tra mỗi lần đẩy code — chạy trước khi triển khai.
+#
+# Mục đích: bắt lỗi biên dịch và lỗi logic TRƯỚC khi code lên máy chủ, thay vì
+# phát hiện khi cô dọn dẹp mở app không được.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: backend/go.sum
+
+      - name: go vet
+        working-directory: backend
+        run: go vet ./...
+
+      # Chỉ chạy test của module Dọn dẹp: hai test render của công cụ video cần
+      # ImageMagick và Chrome, không có trên máy CI. Cài chúng chỉ để chạy hai
+      # test không liên quan là kéo dài mỗi lượt CI thêm vài phút.
+      - name: Test module Dọn dẹp
+        working-directory: backend
+        run: go test -count=1 -run 'Hk|Progress|Derive|Normalize|RoomType|Template|Seed|Register|Login|Duplicate|Phone|Suspended|Cleaner|NoToken|Full|Foreign|Submit|Approved|Photo|Data|Room|Store|Editing|Same|Two|Report|Sync|Suggest|Parse|Blocked|Deadline|Event|Session|BuildPerf|Perf|Review|Summarize|Facility|StarCounts|Open|Apply|Merge' -v .
+
+      - name: Build binary Linux tĩnh
+        working-directory: backend
+        run: CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/unixstay .
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build app Dọn dẹp
+        working-directory: frontend-admin
+        run: |
+          npm ci --no-audit --no-fund
+          # npm hay bỏ sót gói native theo nền tảng (lỗi rolldown-binding).
+          npm install --no-save "@rolldown/binding-linux-x64-gnu@$(node -p "require('./node_modules/rolldown/package.json').version")" || true
+          npm run build
+
+      - name: Kiểm tra bundle thật sự được sinh ra
+        run: |
+          test -f backend/dist-admin/index.html || { echo "thiếu index.html"; exit 1; }
+          ls backend/dist-admin/assets-admin/*.js >/dev/null || { echo "thiếu bundle JS"; exit 1; }
