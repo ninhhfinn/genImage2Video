@@ -119,35 +119,26 @@ func startWebServer(port int) error {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "2.0.0"})
 	})
 
-	// ── Module Dọn dẹp (admin.quanlyhomestay.com) ──
-	// Một binary phục vụ hai web: video.… là công cụ dựng video, admin.… là app
-	// checklist + chấm công cho cô dọn dẹp. Tách bằng tên miền chứ không phải
-	// đường dẫn, để cô dọn dẹp không bao giờ nhìn thấy công cụ video.
-	hkApp, err := NewHKApp(hkDataDir())
-	if err != nil {
-		// Không chặn cả server: công cụ video đang chạy sản xuất, không được sập
-		// chỉ vì module mới mở DB lỗi. Ghi log rõ rồi chạy tiếp thiếu module này.
-		fmt.Printf("⚠️  Không khởi động được module Dọn dẹp: %v\n", err)
-	} else {
-		hkApp.Register(mux)
-		fmt.Printf("🧹  Module Dọn dẹp: dữ liệu tại %s\n", hkDataDir())
-	}
+	// ── Module Dọn dẹp: ĐÃ CHUYỂN ĐI, KHÔNG CÒN CHẠY Ở ĐÂY ──
+	//
+	// App checklist dọn dẹp đã chuyển sang repo ldviet92/contentfactory và phục
+	// vụ tại hkMovedURL. Binary này giờ chỉ còn công cụ dựng video.
+	//
+	// Cố tình KHÔNG gọi NewHKApp nữa: nó mở database và tạo tài khoản quản lý
+	// lúc khởi động. Để lại thì có hai hệ thống cùng ghi dữ liệu dọn dẹp, và
+	// người dùng đăng nhập nhầm vào bản cũ mà không biết vì sao ca dọn không
+	// khớp với bên kia.
+	mux.HandleFunc("/api/hk/", hkMovedAPI)
 
 	// Serve React frontend từ dist/ (production)
 	serveSPA := makeSPAHandler("dist")
-	serveAdminSPA := makeSPAHandler("dist-admin")
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// `/assets-admin/…` phải về app dọn dẹp dù đứng ở đường dẫn nào: trình
-		// duyệt xin tài nguyên bằng đường dẫn tuyệt đối nên nó không mang theo
-		// tiền tố /unixstay.
+		// Đường dẫn cũ của app dọn dẹp — kể cả `/assets-admin/…` mà trang cũ còn
+		// lưu trong cache — đều báo "đã chuyển" thay vì phục vụ app.
 		if isAdminHost(r) || strings.HasPrefix(r.URL.Path, hkPathPrefix) ||
 			strings.HasPrefix(r.URL.Path, "/assets-admin/") {
-			if serveAdminSPA != nil {
-				serveAdminSPA(w, r)
-				return
-			}
-			http.Error(w, "Chưa build app dọn dẹp. Chạy: cd frontend-admin && npm run build", 503)
+			hkMovedPage(w, r)
 			return
 		}
 		if serveSPA != nil {
@@ -160,6 +151,47 @@ func startWebServer(port int) error {
 	fmt.Printf("    Frontend:    http://localhost:5173\n")
 	fmt.Println("    Nhấn Ctrl+C để dừng")
 	return http.ListenAndServe(addr, handler)
+}
+
+// hkMovedURL — chỗ ở mới của app Dọn dẹp.
+const hkMovedURL = "https://marketing.quanlyhomestay.com/unixstay"
+
+// hkMovedPage trả trang báo "đã chuyển" cho mọi đường dẫn cũ của app Dọn dẹp.
+//
+// Không trả 404, cũng không chuyển hướng thẳng: đường dẫn cũ nằm trong lịch sử
+// trình duyệt và trong tin nhắn đã gửi cho cô dọn dẹp. 404 thì họ tưởng hỏng rồi
+// gọi điện hỏi; còn chuyển hướng ngầm thì họ không nhận ra địa chỉ đã đổi và lần
+// sau vẫn gõ địa chỉ cũ. Nói thẳng ra kèm một nút bấm là cách duy nhất để lần
+// sau họ tự vào đúng chỗ.
+//
+// 410 Gone chứ không phải 200: nói với trình duyệt và công cụ tìm kiếm rằng địa
+// chỉ này bỏ hẳn, không phải hỏng tạm thời.
+func hkMovedPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusGone)
+	fmt.Fprintf(w, `<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App Dọn dẹp đã chuyển địa chỉ</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+background:#f6f7f9;color:#14181f;font:16px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.box{max-width:420px;padding:32px 24px;text-align:center}
+h1{font-size:22px;margin:0 0 12px}p{color:#5b6472;margin:0 0 24px}
+a{display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;
+padding:14px 22px;border-radius:10px;font-weight:600}</style></head>
+<body><div class="box"><h1>App Dọn dẹp đã chuyển địa chỉ</h1>
+<p>Địa chỉ cũ không còn dùng nữa. Bấm nút dưới đây để vào app mới, rồi lưu lại vào màn hình chính điện thoại.</p>
+<a href="%s">Mở app Dọn dẹp</a></div></body></html>`, hkMovedURL)
+}
+
+// hkMovedAPI trả lời các lời gọi API cũ. App cũ còn mở trên điện thoại nào đó sẽ
+// hiện đúng câu này thay vì quay vòng "mất kết nối".
+func hkMovedAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusGone)
+	fmt.Fprintf(w, `{"error":"App Dọn dẹp đã chuyển sang %s — mở địa chỉ mới nhé.","moved_to":%q}`,
+		hkMovedURL, hkMovedURL)
 }
 
 // hkPathPrefix — app dọn dẹp phục vụ dưới đường dẫn con này.
